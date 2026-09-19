@@ -22,6 +22,7 @@ from preauth.infrastructure.settings import Settings
 
 logger = logging.getLogger("preauth.voice.assemblyai.post_call")
 _SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+WEBHOOK_UPSTREAM_TIMEOUT_SECS = 10
 
 
 class AssemblyAIChannelNotConfiguredError(DomainError):
@@ -50,6 +51,7 @@ class AssemblyAIWebhookEvent(BaseModel):
     session_id: str | None = None
     timestamp: int | float | str | None = None
     created_at: int | float | str | None = None
+    session: dict[str, Any] = Field(default_factory=dict)
     data: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -62,11 +64,18 @@ class AssemblyAIWebhookEvent(BaseModel):
 
     @property
     def resolved_session_id(self) -> str | None:
-        nested = self.data.get("session")
-        nested_id = None
-        if isinstance(nested, dict):
-            nested_id = nested.get("session_id") or nested.get("id")
-        value = self.session_id or self.data.get("session_id") or self.data.get("id") or nested_id
+        data_session = self.data.get("session")
+        data_session_id = None
+        if isinstance(data_session, dict):
+            data_session_id = data_session.get("session_id") or data_session.get("id")
+        value = (
+            self.session_id
+            or self.session.get("session_id")
+            or self.session.get("id")
+            or self.data.get("session_id")
+            or self.data.get("id")
+            or data_session_id
+        )
         return value if isinstance(value, str) else None
 
     @property
@@ -186,7 +195,11 @@ class AssemblyAIPostCallService:
         self._settings = settings
         self._voice = voice
         self._client = client or (
-            AssemblyAIClient(settings.assemblyai_api_key, api_base=settings.assemblyai_api_base)
+            AssemblyAIClient(
+                settings.assemblyai_api_key,
+                api_base=settings.assemblyai_api_base,
+                timeout_secs=WEBHOOK_UPSTREAM_TIMEOUT_SECS,
+            )
             if settings.assemblyai_api_key
             else None
         )
@@ -282,9 +295,9 @@ class AssemblyAIPostCallService:
         ]
         metadata = {
             "event_id": event_id,
-            "started_at": session.get("started_at"),
+            "started_at": session.get("started_at") or session.get("created_at"),
             "ended_at": session.get("ended_at"),
-            "close_reason": session.get("close_reason"),
+            "close_reason": session.get("public_close_reason") or session.get("close_reason"),
             "artifact_types": artifact_types,
         }
         analysis = {"timeline_metrics": metrics}

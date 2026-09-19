@@ -23,6 +23,17 @@ from preauth.infrastructure.db.session import build_engine, build_session_factor
 from preauth.infrastructure.settings import Settings
 
 
+def _next_cursor(page: dict) -> str | None:
+    """Read the documented nested cursor while tolerating the early top-level preview shape."""
+    metadata = page.get("response_metadata")
+    nested = metadata.get("next_cursor") if isinstance(metadata, dict) else None
+    candidate = nested or page.get("next_cursor") or page.get("cursor")
+    cursor = candidate if isinstance(candidate, str) and candidate else None
+    if page.get("has_more") is True and not cursor:
+        raise AssemblyAIError("AssemblyAI session listing omitted its next cursor")
+    return None if page.get("has_more") is False else cursor
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--agent-id", help="only reconcile sessions for one AssemblyAI agent")
@@ -79,8 +90,7 @@ def main() -> int:
                     else:
                         recorded += 1
                         print(f"recorded {session_id}")
-            cursor_value = page.get("next_cursor") or page.get("cursor")
-            cursor = cursor_value if isinstance(cursor_value, str) and cursor_value else None
+            cursor = _next_cursor(page)
             if not sessions or not cursor:
                 break
     except AssemblyAIError as exc:

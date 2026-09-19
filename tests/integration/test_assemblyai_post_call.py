@@ -4,12 +4,14 @@ import json
 import time
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from preauth.api.app import create_app
 from preauth.application.assemblyai_post_call import AssemblyAIPostCallService
 from preauth.domain.enums import AuditEventType, DocumentType
 from preauth.infrastructure.assemblyai_client import AssemblyAIError
 from preauth.infrastructure.assemblyai_signature import sign
+from preauth.infrastructure.db.models import CallRecord
 from preauth.infrastructure.settings import Settings, VoiceProvider
 from tests.integration.helpers import REVIEWER, TREATMENT_DATE, add_documents
 
@@ -72,10 +74,16 @@ def _post(client: TestClient, payload: dict, *, secret: str = SECRET, timestamp:
 
 def _completed_event(session_id: str = SESSION_ID) -> dict:
     return {
-        "id": "evt_001",
-        "type": "session.completed",
-        "session_id": session_id,
-        "created_at": "2026-09-19T12:00:00Z",
+        "event_id": "evt_001",
+        "event": "session.completed",
+        "timestamp": "2026-09-19T12:00:00Z",
+        "session": {
+            "session_id": session_id,
+            "agent_id": "agent_aai",
+            "status": "completed",
+            "duration_seconds": 212,
+            "public_close_reason": "client_end",
+        },
     }
 
 
@@ -85,10 +93,10 @@ def _ready_session(fake: FakeAssemblyAIClient, session_id: str = SESSION_ID) -> 
         "id": session_id,
         "agent_id": "agent_aai",
         "status": "completed",
-        "duration_ms": 212_000,
-        "started_at": "2026-09-19T11:56:28Z",
+        "duration_seconds": 212,
+        "created_at": "2026-09-19T11:56:28Z",
         "ended_at": "2026-09-19T12:00:00Z",
-        "close_reason": "client_disconnected",
+        "public_close_reason": "client_end",
         "artifacts": [{"type": "timeline", "url": url}],
     }
     fake.timelines[url] = {
@@ -146,7 +154,7 @@ def _case_ready_for_review(app, services) -> str:
     return ready["case_id"]
 
 
-def test_completed_session_records_timeline_and_unblocks_the_linked_case(services):
+def test_completed_session_records_timeline_and_unblocks_the_linked_case(services, session_factory):
     fake = FakeAssemblyAIClient()
     _ready_session(fake)
     app = create_app(services, _settings())
@@ -171,6 +179,10 @@ def test_completed_session_records_timeline_and_unblocks_the_linked_case(service
     assert [turn["role"] for turn in call.transcript] == ["caller", "tool", "agent"]
     assert call.analysis["timeline_metrics"]["average_user_confidence"] == 0.96
     assert AuditEventType.CALL_RECORDED in [event.event_type for event in packet.audit_history]
+    with session_factory() as session:
+        stored = session.scalar(select(CallRecord).where(CallRecord.conversation_id == SESSION_ID))
+        assert stored.call_metadata["started_at"] == "2026-09-19T11:56:28Z"
+        assert stored.call_metadata["close_reason"] == "client_end"
 
 
 def test_missing_artifact_is_retryable_then_idempotent(services):
@@ -208,7 +220,10 @@ def test_webhook_rejects_invalid_delivery_and_maps_provider_outages(services):
 def test_webhook_ignores_other_events_without_fetching_a_session(services):
     fake = FakeAssemblyAIClient()
     with _client(services, fake) as client:
-        response = _post(client, {"type": "session.started", "data": {"session_id": SESSION_ID}})
+        response = _post(
+            client,
+            {"event": "session.started", "session": {"session_id": SESSION_ID}},
+        )
     assert response.status_code == 200
     assert response.json()["accepted"] is False
     assert fake.get_calls == []
@@ -221,4 +236,3 @@ def test_webhook_is_disabled_without_provider_configuration(services):
         response = client.post("/api/v1/voice/assemblyai/post-call", content=b"{}")
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "CHANNEL_NOT_CONFIGURED"
-

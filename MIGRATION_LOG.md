@@ -774,3 +774,25 @@ produced PCM16/24 kHz and PCMU/8 kHz agents with exactly the three allowed tools
 CI now validates the AssemblyAI provisioning dry-run as a generated contract and invokes the conversation harness
 directly against a fresh database, proving the harness owns its migration prerequisite. The ElevenLabs dry-run is
 retained in CI only while that implementation remains the pre-acceptance rollback path.
+
+### Current AssemblyAI webhook/session contract audit
+
+- Updated completed-session parsing to the documented envelope: top-level `event`, `event_id`, `timestamp`, and a
+  top-level `session` object containing `session_id`. Earlier preview shapes remain accepted for compatibility.
+- Preserved official `created_at` and `public_close_reason` fields in immutable call metadata and continued using
+  `duration_seconds` when supplied.
+- Bounded webhook-side AssemblyAI REST/artifact calls to 10 seconds so an upstream stall fails retryably before
+  the provider's 15-second webhook response deadline.
+- Corrected reconciliation pagination to consume `response_metadata.next_cursor` and `has_more`. A malformed page
+  now fails visibly rather than silently stopping after the first 200 sessions; early top-level cursor shapes are
+  still tolerated.
+- Aligned stored-agent provisioning with the current API schema: audio inputs/outputs now declare `type: audio`,
+  while client-side stored tools omit the inline-session-only `type: function` discriminator and the server-side
+  `http` block. This preserves local `tool.call` execution without risking a provisioning-time schema rejection.
+- Webhook creation continues to bind each subscription to its agent, while webhook updates now send only mutable
+  fields and omit `agent_id`. Setup also rejects webhook secrets outside AssemblyAI's 32-256 printable-ASCII,
+  no-whitespace contract before making any provider changes.
+
+Contract-audit verification: **357 tests passed**, the deterministic harness passed **5 scenarios / 30 checks**,
+the 12-file catalogue consistency check passed, and generated API documentation was current on 2026-09-19. The
+six warnings remained limited to the known SQLAlchemy/SQLite Python 3.12 deprecation and local pytest-cache issue.

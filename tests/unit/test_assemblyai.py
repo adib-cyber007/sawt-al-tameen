@@ -1,5 +1,6 @@
 """AssemblyAI tool schemas, stored-agent payloads and REST boundary."""
 
+import importlib.util
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -14,12 +15,22 @@ from preauth.infrastructure.assemblyai_client import AssemblyAIClient, AssemblyA
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _load_script(name: str):
+    path = ROOT / "scripts" / name
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_every_tool_converts_to_an_assemblyai_function_schema():
     configs = all_function_tool_configs()
     assert [config["name"] for config in configs] == [tool.name for tool in TOOLS]
     assert len(configs) == 3
     for config in configs:
-        assert config["type"] == "function"
+        assert "type" not in config
+        assert "http" not in config
         assert config["description"]
         assert config["execution_mode"] == "interactive"
         assert 1 <= config["timeout_seconds"] <= 300
@@ -33,21 +44,17 @@ def test_every_tool_converts_to_an_assemblyai_function_schema():
 
 
 def test_agent_payloads_use_channel_native_audio_and_one_tool_source():
-    import importlib.util
-
-    path = ROOT / "scripts" / "assemblyai_setup.py"
-    spec = importlib.util.spec_from_file_location("assemblyai_setup", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _load_script("assemblyai_setup.py")
 
     agents = module.desired_agents(voice_id="alba", llm_model="gemini-test", api_key_for_gateway="test-key")
     assert set(agents) == {"browser", "phone"}
     assert agents["browser"]["input"]["format"] == {"encoding": "audio/pcm", "sample_rate": 24000}
     assert agents["phone"]["input"]["format"] == {"encoding": "audio/pcmu", "sample_rate": 8000}
     for payload in agents.values():
+        assert payload["input"]["type"] == payload["output"]["type"] == "audio"
         assert payload["input"]["format"] == payload["output"]["format"]
         assert [tool["name"] for tool in payload["tools"]] == [tool.name for tool in TOOLS]
+        assert all("type" not in tool and "http" not in tool for tool in payload["tools"])
         assert payload["llm"] == [{
             "base_url": "https://llm-gateway.assemblyai.com/v1",
             "model": "gemini-test",
@@ -55,6 +62,51 @@ def test_agent_payloads_use_channel_native_audio_and_one_tool_source():
         }]
         assert payload["input"]["keyterms"]
         assert "never issue a final approval or denial" in payload["system_prompt"].lower()
+
+
+def test_webhook_updates_do_not_send_immutable_agent_scope():
+    module = _load_script("assemblyai_setup.py")
+    calls = []
+
+    class Client:
+        def request(self, method, path, body):
+            calls.append((method, path, body))
+            return {}
+
+    state = {
+        "agents": {"browser": "agent_browser"},
+        "webhook_subscriptions": {"browser": "subscription_browser"},
+    }
+    module._upsert_webhooks(
+        Client(), state, public_base_url="https://voice.example", secret="s" * 32
+    )
+
+    assert calls == [(
+        "PATCH",
+        "/v1/webhook-subscriptions/subscription_browser",
+        {
+            "url": "https://voice.example/api/v1/voice/assemblyai/post-call",
+            "events": ["session.completed"],
+            "secret": "s" * 32,
+            "enabled": True,
+        },
+    )]
+
+
+@pytest.mark.parametrize(
+    ("secret", "expected"),
+    [
+        ("s" * 32, True),
+        ("s" * 256, True),
+        ("s" * 31, False),
+        ("s" * 257, False),
+        ("s" * 31 + " ", False),
+        ("s" * 31 + "é", False),
+    ],
+)
+def test_webhook_secret_validation_matches_provider_contract(secret, expected):
+    module = _load_script("assemblyai_setup.py")
+    assert module.valid_webhook_secret(secret) is expected
 
 
 @pytest.fixture
@@ -116,3 +168,15 @@ def test_rest_client_errors_do_not_leak_the_key(upstream):
 def test_unreachable_rest_api_fails_boundedly():
     with pytest.raises(AssemblyAIError, match="could not be reached"):
         AssemblyAIClient("key", api_base="http://127.0.0.1:1", timeout_secs=1).request("GET", "/v1/agents")
+
+
+def test_reconciliation_uses_the_documented_nested_session_cursor():
+    reconcile = _load_script("assemblyai_reconcile.py")
+    assert reconcile._next_cursor(
+        {"has_more": True, "response_metadata": {"next_cursor": "page-2"}}
+    ) == "page-2"
+    assert reconcile._next_cursor(
+        {"has_more": False, "response_metadata": {"next_cursor": "ignored"}}
+    ) is None
+    with pytest.raises(AssemblyAIError, match="omitted its next cursor"):
+        reconcile._next_cursor({"has_more": True, "response_metadata": {}})

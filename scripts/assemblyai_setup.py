@@ -35,6 +35,8 @@ FIRST_MESSAGE = (
     "Who am I speaking with?"
 )
 KEYTERM_LIMIT = 100
+WEBHOOK_SECRET_MIN_LENGTH = 32
+WEBHOOK_SECRET_MAX_LENGTH = 256
 
 
 def _catalogue(name: str) -> dict[str, Any]:
@@ -63,6 +65,16 @@ def keyterms() -> list[str]:
     return list(dict.fromkeys(terms))[:KEYTERM_LIMIT]
 
 
+def valid_webhook_secret(secret: str) -> bool:
+    """Match AssemblyAI's webhook-secret length and printable-ASCII contract."""
+    return (
+        WEBHOOK_SECRET_MIN_LENGTH <= len(secret) <= WEBHOOK_SECRET_MAX_LENGTH
+        and secret.isascii()
+        and secret.isprintable()
+        and not any(character.isspace() for character in secret)
+    )
+
+
 def agent_payload(
     *,
     name: str,
@@ -78,11 +90,13 @@ def agent_payload(
         "greeting": FIRST_MESSAGE,
         "voice": {"voice_id": voice_id},
         "input": {
+            "type": "audio",
             "format": {"encoding": encoding, "sample_rate": sample_rate},
             "keyterms": keyterms(),
             "turn_detection": {"interrupt_response": True},
         },
         "output": {
+            "type": "audio",
             "voice": voice_id,
             "format": {"encoding": encoding, "sample_rate": sample_rate},
             "volume": 100,
@@ -160,7 +174,8 @@ def _upsert_webhooks(
         }
         subscription_id = subscriptions.get(channel)
         if subscription_id:
-            client.request("PATCH", f"/v1/webhook-subscriptions/{subscription_id}", body)
+            update_body = {key: value for key, value in body.items() if key != "agent_id"}
+            client.request("PATCH", f"/v1/webhook-subscriptions/{subscription_id}", update_body)
             print(f"webhook: updated {channel} {subscription_id}")
         else:
             created = client.request("POST", "/v1/webhook-subscriptions", body)
@@ -221,6 +236,12 @@ def main() -> int:
         return 2
     if not base_url.startswith("https://"):
         print("PREAUTH_PUBLIC_BASE_URL must be a public https:// URL", file=sys.stderr)
+        return 2
+    if not valid_webhook_secret(webhook_secret):
+        print(
+            "PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET must contain 32-256 printable ASCII characters without whitespace",
+            file=sys.stderr,
+        )
         return 2
 
     state = _load_state()
