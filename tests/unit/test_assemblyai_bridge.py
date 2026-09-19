@@ -136,6 +136,7 @@ def test_browser_bridge_maps_pcm_audio_and_sanitises_ready_event(monkeypatch):
     provider = FakeProvider(
         [
             {"type": "session.ready", "session_id": "sess_browser", "config": {"system_prompt": "private"}},
+            {"type": "session.updated", "config": {"tools": [{"description": "private"}]}},
             {"type": "reply.audio", "data": "output-pcm"},
             {"type": "transcript.user", "text": "hello"},
         ]
@@ -153,6 +154,11 @@ def test_browser_bridge_maps_pcm_audio_and_sanitises_ready_event(monkeypatch):
     assert provider.sent[0] == {
         "type": "session.update", "session": {"agent_id": "agent_browser"}
     }
+    assert provider.sent[1]["type"] == "session.update"
+    assert [tool["name"] for tool in provider.sent[1]["session"]["tools"]] == [
+        "verify_caller", "check_coverage_rule", "log_transcript"
+    ]
+    assert all(tool["type"] == "function" for tool in provider.sent[1]["session"]["tools"])
     assert {"type": "input.audio", "audio": "input-pcm"} in provider.sent
     assert client.sent[0] == {"type": "session.ready", "session_id": "sess_browser"}
     assert provider.sent[0].get("Authorization") is None
@@ -166,6 +172,7 @@ def test_twilio_bridge_maps_pcmu_audio_barge_in_and_tool_results(monkeypatch):
     provider = FakeProvider(
         [
             {"type": "session.ready", "session_id": "sess_phone"},
+            {"type": "session.updated"},
             {"type": "reply.audio", "data": "outbound-pcmu"},
             {"type": "input.speech.started"},
             {"type": "tool.call", "call_id": "call_1", "name": "lookup", "arguments": {"id": "1"}},
@@ -189,6 +196,8 @@ def test_twilio_bridge_maps_pcmu_audio_barge_in_and_tool_results(monkeypatch):
     asyncio.run(assemblyai_bridge.bridge_twilio(twilio, settings, gateway, "CA123"))
 
     assert provider.sent[0] == {"type": "session.update", "session": {"agent_id": "agent_phone"}}
+    assert provider.sent[1]["type"] == "session.update"
+    assert all(tool["type"] == "function" for tool in provider.sent[1]["session"]["tools"])
     assert {"type": "input.audio", "audio": "inbound-pcmu"} in provider.sent
     result = next(event for event in provider.sent if event["type"] == "tool.result")
     assert result["call_id"] == "call_1" and result["is_error"] is False
@@ -201,7 +210,10 @@ def test_twilio_bridge_maps_pcmu_audio_barge_in_and_tool_results(monkeypatch):
 
 def test_browser_bridge_resumes_the_same_provider_session_after_a_network_drop(monkeypatch):
     first = FakeProvider(
-        [{"type": "session.ready", "session_id": "sess_resume"}],
+        [
+            {"type": "session.ready", "session_id": "sess_resume"},
+            {"type": "session.updated"},
+        ],
         error=OSError("connection dropped"),
     )
     resumed = FakeProvider(
@@ -236,7 +248,10 @@ def test_browser_bridge_resumes_the_same_provider_session_after_a_network_drop(m
 
 def test_twilio_bridge_resumes_without_losing_the_stream_identity(monkeypatch):
     first = FakeProvider(
-        [{"type": "session.ready", "session_id": "sess_phone_resume"}],
+        [
+            {"type": "session.ready", "session_id": "sess_phone_resume"},
+            {"type": "session.updated"},
+        ],
         error=OSError("connection dropped"),
     )
     resumed = FakeProvider(
@@ -295,7 +310,10 @@ def test_resume_attempts_are_bounded_and_preserve_the_original_session_id(monkey
 
 def test_resume_refusal_fails_closed_without_starting_a_fresh_session(monkeypatch):
     first = FakeProvider(
-        [{"type": "session.ready", "session_id": "sess_expired"}],
+        [
+            {"type": "session.ready", "session_id": "sess_expired"},
+            {"type": "session.updated"},
+        ],
         error=OSError("connection dropped"),
     )
     refused = FakeProvider(
@@ -329,6 +347,36 @@ def test_resume_refusal_fails_closed_without_starting_a_fresh_session(monkeypatc
     asyncio.run(scenario())
 
     assert refused.sent[0] == {"type": "session.resume", "session_id": "sess_expired"}
+    assert client.closed == [(1011, "Voice service unavailable")]
+
+
+def test_tool_configuration_rejection_fails_closed_without_leaking_provider_detail(monkeypatch):
+    provider = FakeProvider(
+        [
+            {"type": "session.ready", "session_id": "sess_bad_tools"},
+            {
+                "type": "session.error",
+                "code": "invalid_configuration",
+                "message": "private schema rejection detail",
+            },
+        ]
+    )
+    client = FakeClientSocket([])
+    monkeypatch.setattr(assemblyai_bridge, "connect", lambda *args, **kwargs: provider)
+    settings = Settings(
+        voice_provider=VoiceProvider.ASSEMBLYAI,
+        assemblyai_api_key="secret",
+        assemblyai_browser_agent_id="agent_browser",
+    )
+
+    async def scenario():
+        await assemblyai_bridge.close_after_bridge(
+            client, assemblyai_bridge.bridge_browser(client, settings, FakeGateway())
+        )
+
+    asyncio.run(scenario())
+
+    assert provider.sent[1]["session"]["tools"]
     assert client.closed == [(1011, "Voice service unavailable")]
 
 

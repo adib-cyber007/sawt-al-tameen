@@ -1,8 +1,8 @@
-"""AssemblyAI stored-agent tool definitions generated from the provider-neutral toolbox.
+"""AssemblyAI client-side function tools generated from the provider-neutral toolbox.
 
-The realtime session bridge executes these client-side tools inside this process. Stored-agent tools omit both the
-inline-session ``type`` discriminator and the server-side ``http`` configuration, so AssemblyAI emits ``tool.call``
-events; credentials and business endpoints are never exposed to the browser or stored on the voice platform.
+The realtime session bridge adds these tools after binding a stored agent, then executes them inside this process.
+AssemblyAI sees only JSON Schema and emits ``tool.call`` events; credentials and business endpoints are never
+exposed to the browser or stored on the voice platform.
 """
 
 from copy import deepcopy
@@ -57,6 +57,7 @@ def parameter_schema(model: type[BaseModel]) -> dict[str, Any]:
 
 def function_tool_config(tool: Tool, *, timeout_seconds: int = 30) -> dict[str, Any]:
     return {
+        "type": "function",
         "name": tool.name,
         "description": tool.description,
         "parameters": parameter_schema(tool.input_model),

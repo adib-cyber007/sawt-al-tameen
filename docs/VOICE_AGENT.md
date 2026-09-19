@@ -22,20 +22,25 @@ flowchart LR
 ## What is provisioned
 
 `scripts/assemblyai_setup.py` idempotently creates two stored agents from the same source-controlled English
-prompt and tool schemas:
+prompt and audio configuration:
 
 | Agent | Input/output | Why separate |
 |---|---|---|
 | Browser | signed PCM16 mono, 24 kHz | Native browser capture/playback without telephony degradation |
 | Phone | G.711 PCMU mono, 8 kHz | Native Twilio Media Streams format; no application transcoding |
 
-Both agents use:
+Both stored agents use:
 
 - `voice/system_prompt.md`, which forbids final decisions and non-English automated intake;
-- exactly `verify_caller`, `check_coverage_rule`, and `log_transcript`;
 - AssemblyAI LLM Gateway with `gemini-2.5-flash` by default;
 - source-derived keyterms for policy ids, procedure codes, providers and UAE terminology;
 - a `session.completed` subscription pointing at `/api/v1/voice/assemblyai/post-call`.
+
+Stored agents deliberately contain no HTTP tools. After the provider returns `session.ready`, the backend bridge
+attaches exactly `verify_caller`, `check_coverage_rule`, and `log_transcript` as client-side function tools and
+waits for `session.updated` before forwarding caller audio. This satisfies AssemblyAI's initial-update rule
+(`agent_id` is mutually exclusive with inline configuration) while preserving trusted local tool execution and
+provider-session correlation.
 
 The generated ids and subscription ids are in git-ignored `.assemblyai-state.json`. Re-running updates the same
 resources rather than creating duplicates.

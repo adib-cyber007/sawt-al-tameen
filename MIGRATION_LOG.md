@@ -504,7 +504,8 @@ Keep the existing business interfaces and introduce provider-specific transport 
 
 ### AssemblyAI agent configuration
 
-Create two stored AssemblyAI agents from the same English prompt and function-tool definitions:
+Create two stored AssemblyAI agents from the same English prompt and audio configuration. Keep stored-agent tools
+empty; after binding an agent id, the backend attaches the shared function-tool definitions to the live session:
 
 | Agent | Input/output format | Deployment |
 |---|---|---|
@@ -786,13 +787,16 @@ retained in CI only while that implementation remains the pre-acceptance rollbac
 - Corrected reconciliation pagination to consume `response_metadata.next_cursor` and `has_more`. A malformed page
   now fails visibly rather than silently stopping after the first 200 sessions; early top-level cursor shapes are
   still tolerated.
-- Aligned stored-agent provisioning with the current API schema: audio inputs/outputs now declare `type: audio`,
-  while client-side stored tools omit the inline-session-only `type: function` discriminator and the server-side
-  `http` block. This preserves local `tool.call` execution without risking a provisioning-time schema rejection.
+- Aligned stored-agent provisioning with the current API schema: audio inputs/outputs now declare `type: audio`
+  and stored agents have no server-side HTTP tools. On each new WebSocket session, the bridge first binds the
+  stored agent, then attaches the three client-side tools with `type: function` after `session.ready`; caller audio
+  remains buffered until `session.updated` confirms those tools are active. Resumed sessions preserve that config.
+  This follows the provider's mutual-exclusion rule for the initial `agent_id` update while keeping business tools
+  and credentials inside this process.
 - Webhook creation continues to bind each subscription to its agent, while webhook updates now send only mutable
   fields and omit `agent_id`. Setup also rejects webhook secrets outside AssemblyAI's 32-256 printable-ASCII,
   no-whitespace contract before making any provider changes.
 
-Contract-audit verification: **357 tests passed**, the deterministic harness passed **5 scenarios / 30 checks**,
+Contract-audit verification: **358 tests passed**, the deterministic harness passed **5 scenarios / 30 checks**,
 the 12-file catalogue consistency check passed, and generated API documentation was current on 2026-09-19. The
 six warnings remained limited to the known SQLAlchemy/SQLite Python 3.12 deprecation and local pytest-cache issue.

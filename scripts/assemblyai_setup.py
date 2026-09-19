@@ -1,7 +1,8 @@
 """Create or update the English-only AssemblyAI Voice Agent resources.
 
-Two stored agents share one source-controlled prompt and tool set. The browser agent uses 24 kHz PCM; the phone
-agent uses Twilio's native 8 kHz PCMU. Re-running updates in place using ids in ``.assemblyai-state.json``.
+Two stored agents share one source-controlled prompt. The browser agent uses 24 kHz PCM; the phone agent uses
+Twilio's native 8 kHz PCMU. The bridge attaches client-side tools to each live session. Re-running updates in
+place using ids in ``.assemblyai-state.json``.
 
 Required for a live run:
     ASSEMBLYAI_API_KEY
@@ -21,7 +22,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from preauth.agent_tools.assemblyai import all_function_tool_configs
 from preauth.infrastructure.assemblyai_client import AssemblyAIClient, AssemblyAIError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,7 +101,9 @@ def agent_payload(
             "format": {"encoding": encoding, "sample_rate": sample_rate},
             "volume": 100,
         },
-        "tools": all_function_tool_configs(),
+        # Function tools are client-side session configuration. The server bridge attaches them after binding this
+        # stored agent; keeping the stored list empty avoids converting them into provider-executed HTTP tools.
+        "tools": [],
         "llm": [
             {
                 "base_url": LLM_GATEWAY_BASE,

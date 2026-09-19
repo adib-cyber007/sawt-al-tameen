@@ -48,7 +48,7 @@ engine and one case lifecycle, and a voice provider does not get its own.
 
 | Layer | Implementation |
 |---|---|
-| Conversation (hosted) | Two AssemblyAI stored agents configured from `voice/` by `scripts/assemblyai_setup.py`; backend browser/Twilio WebSocket bridges |
+| Conversation (hosted) | Two AssemblyAI stored agents configured from `voice/` by `scripts/assemblyai_setup.py`; backend browser/Twilio WebSocket bridges attach the client-side tools after session binding |
 | Conversation (local) | `local/agent.py` over `local/llm.py` (Ollama) and `local/speech.py` (faster-whisper, Piper); see [LOCAL_MODE.md](LOCAL_MODE.md) |
 | Agent / orchestration | `agent_tools/toolbox.py` (three tools), `agent_tools/voice_gateway.py` (transport adapter) |
 | Case management | `domain/case_state.py`, `application/desk_service.py` |

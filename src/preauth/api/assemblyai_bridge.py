@@ -16,6 +16,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
+from preauth.agent_tools.assemblyai import all_function_tool_configs
 from preauth.agent_tools.voice_gateway import VoiceToolGateway
 from preauth.infrastructure import assemblyai_media_token
 from preauth.infrastructure.settings import Settings
@@ -28,6 +29,10 @@ _UPSTREAM_ERRORS = (ConnectionClosed, WebSocketException, TimeoutError, OSError)
 
 class AssemblyAIResumeError(RuntimeError):
     """The provider session could not be resumed without losing correlation or conversation context."""
+
+
+class AssemblyAIConfigurationError(RuntimeError):
+    """The provider rejected the client-side tool configuration for a new session."""
 
 
 class AssemblyAIToolCoordinator:
@@ -101,7 +106,7 @@ async def _send_provider(provider: Any, payload: dict[str, Any]) -> None:
 def _safe_browser_event(event: dict[str, Any]) -> dict[str, Any] | None:
     """Do not expose tool arguments or the stored agent's expanded configuration to the browser."""
     event_type = event.get("type")
-    if event_type == "tool.call":
+    if event_type in {"tool.call", "session.updated"}:
         return None
     if event_type == "session.ready":
         return {"type": "session.ready", "session_id": event.get("session_id")}
@@ -202,15 +207,25 @@ async def bridge_browser(websocket: WebSocket, settings: Settings, gateway: Voic
             async def from_provider() -> None:
                 async for raw in provider:
                     event = json.loads(raw)
-                    if event.get("type") == "session.ready":
-                        ready.set()
+                    event_type = event.get("type")
+                    if event_type == "session.ready":
                         logger.info(
                             "assemblyai_browser_session_ready", extra={"session_id": event.get("session_id")}
                         )
-                    if event.get("type") == "session.error" and event.get("code") in {
-                        "session_not_found", "session_forbidden", "session_expired"
-                    }:
-                        raise AssemblyAIResumeError("AssemblyAI refused to resume the session")
+                        if resume_session_id:
+                            ready.set()
+                        else:
+                            await _send_provider(
+                                provider,
+                                {"type": "session.update", "session": {"tools": all_function_tool_configs()}},
+                            )
+                    elif event_type == "session.updated" and not resume_session_id:
+                        ready.set()
+                    if event_type == "session.error":
+                        if event.get("code") in {"session_not_found", "session_forbidden", "session_expired"}:
+                            raise AssemblyAIResumeError("AssemblyAI refused to resume the session")
+                        if not ready.is_set():
+                            raise AssemblyAIConfigurationError("AssemblyAI rejected the session tool configuration")
                     for result in await coordinator.handle(event):
                         await _send_provider(provider, result)
                     safe = _safe_browser_event(event)
@@ -291,15 +306,24 @@ async def bridge_twilio(
                     event = json.loads(raw)
                     event_type = event.get("type")
                     if event_type == "session.ready":
-                        provider_ready.set()
                         logger.info(
                             "assemblyai_twilio_session_ready",
                             extra={"session_id": event.get("session_id"), "call_sid": expected_call_sid},
                         )
-                    if event_type == "session.error" and event.get("code") in {
-                        "session_not_found", "session_forbidden", "session_expired"
-                    }:
-                        raise AssemblyAIResumeError("AssemblyAI refused to resume the session")
+                        if resume_session_id:
+                            provider_ready.set()
+                        else:
+                            await _send_provider(
+                                provider,
+                                {"type": "session.update", "session": {"tools": all_function_tool_configs()}},
+                            )
+                    elif event_type == "session.updated" and not resume_session_id:
+                        provider_ready.set()
+                    if event_type == "session.error":
+                        if event.get("code") in {"session_not_found", "session_forbidden", "session_expired"}:
+                            raise AssemblyAIResumeError("AssemblyAI refused to resume the session")
+                        if not provider_ready.is_set():
+                            raise AssemblyAIConfigurationError("AssemblyAI rejected the session tool configuration")
                     for result in await coordinator.handle(event):
                         await _send_provider(provider, result)
                     if event_type == "reply.audio" and isinstance(event.get("data"), str):
@@ -321,7 +345,7 @@ async def close_after_bridge(websocket: WebSocket, bridge: Awaitable[None]) -> N
     """Map upstream failures to a generic WebSocket close without leaking credentials or response bodies."""
     try:
         await bridge
-    except (*_UPSTREAM_ERRORS, json.JSONDecodeError, AssemblyAIResumeError):
+    except (*_UPSTREAM_ERRORS, json.JSONDecodeError, AssemblyAIResumeError, AssemblyAIConfigurationError):
         logger.exception("assemblyai_bridge_failed")
         try:
             await websocket.close(code=1011, reason="Voice service unavailable")

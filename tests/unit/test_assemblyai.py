@@ -29,7 +29,7 @@ def test_every_tool_converts_to_an_assemblyai_function_schema():
     assert [config["name"] for config in configs] == [tool.name for tool in TOOLS]
     assert len(configs) == 3
     for config in configs:
-        assert "type" not in config
+        assert config["type"] == "function"
         assert "http" not in config
         assert config["description"]
         assert config["execution_mode"] == "interactive"
@@ -53,8 +53,7 @@ def test_agent_payloads_use_channel_native_audio_and_one_tool_source():
     for payload in agents.values():
         assert payload["input"]["type"] == payload["output"]["type"] == "audio"
         assert payload["input"]["format"] == payload["output"]["format"]
-        assert [tool["name"] for tool in payload["tools"]] == [tool.name for tool in TOOLS]
-        assert all("type" not in tool and "http" not in tool for tool in payload["tools"])
+        assert payload["tools"] == []
         assert payload["llm"] == [{
             "base_url": "https://llm-gateway.assemblyai.com/v1",
             "model": "gemini-test",
