@@ -41,7 +41,7 @@ in git-ignored `.hosted/secrets.env`. A rerun updates existing agents/subscripti
 | `PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID` | No | Generated browser-agent id |
 | `PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID` | No | Generated phone-agent id |
 | `PREAUTH_GATEWAY_SECRET` | Yes | Generated protection for staff/reviewer APIs |
-| `PREAUTH_VOICE_AGENT_TOKEN` | Yes | Generated compatibility token for the HTTP tool transport/deployment checks |
+| `PREAUTH_VOICE_TOOL_TOKEN` | Yes | Generated token for the provider-neutral deployment diagnostic endpoint |
 
 Never commit real values. `ASSEMBLYAI_API_KEY` is used only server-side.
 
@@ -145,11 +145,3 @@ The command lists completed sessions and uses the same idempotent artifact-inges
 records are left unchanged; artifacts still being prepared remain pending.
 
 Logs are in `.hosted/backend.log` and `.hosted/tunnel.log`. API health is `/health`; OpenAPI is `/docs`.
-
-## Rollback during acceptance
-
-Set `VOICE_PROVIDER=elevenlabs`, restore `ELEVENLABS_API_KEY`, `PREAUTH_ELEVENLABS_AGENT_ID`,
-`PREAUTH_ELEVENLABS_WEBHOOK_SECRET`, and restart. If the Twilio URL was changed, restore the same application
-inbound endpoint—it dispatches by provider. The retained ElevenLabs setup, register-call client, webhook route,
-tests and `.elevenlabs-state.json` make rollback immediate. Do not delete either provider's remote resources as
-part of rollback.

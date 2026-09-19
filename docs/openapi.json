@@ -5423,99 +5423,9 @@
         ]
       }
     },
-    "/api/v1/voice/elevenlabs/post-call": {
-      "post": {
-        "description": "Receives `post_call_transcription` events, stores the transcript and analysis as an immutable call record, and adds a `CALL_RECORDED` audit event to every case the conversation touched. Idempotent per conversation (platform retries are acknowledged, not duplicated). Other event types are acknowledged and ignored.\n\n**Authorisation:** Header `elevenlabs-signature` (HMAC-SHA256 with `PREAUTH_ELEVENLABS_WEBHOOK_SECRET`).\n\n**State transitions:** None. Human sign-off on affected cases becomes possible once all their calls are recorded.",
-        "operationId": "post_call_webhook_api_v1_voice_elevenlabs_post_call_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "elevenlabs-signature",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Elevenlabs-Signature"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PostCallOutcome"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "WEBHOOK_PAYLOAD_INVALID"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "WEBHOOK_SIGNATURE_INVALID"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "INTERNAL_ERROR"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "CHANNEL_NOT_CONFIGURED"
-          }
-        },
-        "summary": "ElevenLabs post-call webhook",
-        "tags": [
-          "Voice channel (ElevenLabs)"
-        ]
-      }
-    },
     "/api/v1/voice/tools/{tool_name}": {
       "post": {
-        "description": "Invokes one agent tool on behalf of the voice platform. The body is the tool's flat parameter object (see `scripts/elevenlabs_setup.py` or `preauth.agent_tools.elevenlabs`). Empty strings and nulls are treated as omitted. Business failures return HTTP 200 with `ok=false`, a stable `error.code`, and `guidance` the agent can act on, because the model must be able to recover mid-call. Unexpected failures return the standard 500 envelope. Calls carrying `X-Conversation-ID` are linked to the cases they touch.\n\n**Authorisation:** Header `Authorization: Bearer <PREAUTH_VOICE_AGENT_TOKEN>`. Acts as actor `VOICE_AGENT`.\n\n**State transitions:** Those of the underlying tool. Never `APPROVED` or `DENIED`.",
+        "description": "Invokes one provider-neutral voice tool and links the optional `X-Conversation-ID` to any case it touches. This endpoint is used by deployment verification; live AssemblyAI sessions execute the same gateway directly over their server-owned WebSocket.\n\n**Authorisation:** Header `Authorization: Bearer <PREAUTH_VOICE_TOOL_TOKEN>`.\n\n**State transitions:** Those of the underlying tool. Never `APPROVED` or `DENIED`.",
         "operationId": "voice_tool_api_v1_voice_tools__tool_name__post",
         "parameters": [
           {
@@ -5545,7 +5455,7 @@
             }
           },
           {
-            "description": "Voice platform conversation id",
+            "description": "Diagnostic conversation id",
             "in": "header",
             "name": "x-conversation-id",
             "required": false,
@@ -5558,7 +5468,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Voice platform conversation id",
+              "description": "Diagnostic conversation id",
               "title": "X-Conversation-Id"
             }
           }
@@ -5626,15 +5536,15 @@
             "description": "CHANNEL_NOT_CONFIGURED"
           }
         },
-        "summary": "Voice platform server-tool call",
+        "summary": "Invoke a voice tool for deployment diagnostics",
         "tags": [
-          "Voice channel (ElevenLabs)"
+          "Voice channel diagnostics"
         ]
       }
     },
     "/api/v1/voice/twilio/inbound": {
       "post": {
-        "description": "Set as the Voice webhook of your Twilio number (A call comes in \u2192 Webhook \u2192 HTTP POST). Accepts Twilio's form-encoded call parameters and returns `application/xml` TwiML for the selected hosted voice provider. ElevenLabs uses its register-call API; AssemblyAI receives a signed, short-lived WebSocket media URL.\n\n**Authorisation:** Header `X-Twilio-Signature`, validated with `TWILIO_AUTH_TOKEN` against `PREAUTH_PUBLIC_BASE_URL` + this path. Provider-specific credentials and agent IDs must also be configured.\n\n**State transitions:** None. The call uses the same business tools and transcript safety boundary for either provider.",
+        "description": "Set as the Voice webhook of your Twilio number (A call comes in \u2192 Webhook \u2192 HTTP POST). Accepts Twilio's form-encoded call parameters and returns `application/xml` TwiML containing a signed, short-lived AssemblyAI media WebSocket URL.\n\n**Authorisation:** Header `X-Twilio-Signature`, validated with `TWILIO_AUTH_TOKEN` against `PREAUTH_PUBLIC_BASE_URL` + this path. Provider-specific credentials and agent IDs must also be configured.\n\n**State transitions:** None. The call uses the AssemblyAI business tools and transcript safety boundary.",
         "operationId": "twilio_inbound_api_v1_voice_twilio_inbound_post",
         "parameters": [
           {

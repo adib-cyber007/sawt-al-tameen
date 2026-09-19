@@ -1,24 +1,23 @@
 """Bring the hosted voice deployment up with one command: ``./scripts/run_hosted.sh``.
 
 Orchestration only. Every step calls something that already exists — the backend, ``verify_deployment.py``,
-the selected provider setup script, or one documented provider endpoint. Nothing here touches cases or rules.
+the AssemblyAI setup script, or one documented provider endpoint. Nothing here touches cases or rules.
 
     a. start the backend
     b. start the tunnel (ngrok static domain, or Cloudflare named tunnel), and wait until the public URL
        answers
     c. verify the deployment through the public URL; stop if anything fails
-    d. create or update the selected provider's agents, tools and post-call subscriptions
+    d. create or update the AssemblyAI agents, tools and post-call subscriptions
     e. restart with the generated agent ids and re-verify
     f. check the Twilio inbound endpoint and print the one Twilio console setting it needs
     g. print what is live, then keep both processes running until Ctrl+C
 
-Configuration comes from ``.env``; see ``.env.example``. Values this script generates (the voice-tool token, the
-gateway secret and the webhook signing secret) are kept in ``.hosted/secrets.env``, which is git-ignored and is
+Configuration comes from ``.env``; see ``.env.example``. Values this script generates (the gateway secret and
+provider webhook/media secrets) are kept in ``.hosted/secrets.env``, which is git-ignored and is
 never read by local mode.
 """
 
 import argparse
-import getpass
 import json
 import os
 import re
@@ -40,18 +39,10 @@ ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = ROOT / ".env"
 HOSTED_DIR = ROOT / ".hosted"
 SECRETS_FILE = HOSTED_DIR / "secrets.env"
-ELEVENLABS_STATE_FILE = ROOT / ".elevenlabs-state.json"
 ASSEMBLYAI_STATE_FILE = ROOT / ".assemblyai-state.json"
-API = os.environ.get("PREAUTH_ELEVENLABS_API_BASE", "https://api.elevenlabs.io").rstrip("/")
 
-ELEVENLABS_WEBHOOK_PATH = "/api/v1/voice/elevenlabs/post-call"
 ASSEMBLYAI_WEBHOOK_PATH = "/api/v1/voice/assemblyai/post-call"
 TWILIO_INBOUND_PATH = "/api/v1/voice/twilio/inbound"
-WEBHOOK_NAME = "sawt-al-tameen post-call"
-DASHBOARD = {
-    "agents_settings": "https://elevenlabs.io/app/agents/settings",
-    "api_keys": "https://elevenlabs.io/app/settings/api-keys",
-}
 _PLACEHOLDER = re.compile(r"^(|<.*>|your[-_ ].*|changeme|x+|\.\.\.)$", re.IGNORECASE)
 _E164 = re.compile(r"^\+[1-9][0-9]{7,14}$")
 
@@ -124,41 +115,6 @@ def remember_secret(config: dict[str, str], name: str, value: str) -> None:
     SECRETS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
     SECRETS_FILE.chmod(0o600)
     config[name] = value
-
-
-# --------------------------------------------------------------------------- ElevenLabs
-
-
-def elevenlabs(config: dict[str, str], method: str, path: str, body: dict[str, Any] | None = None) -> Any:
-    request = urllib.request.Request(
-        API + path,
-        method=method,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={"xi-api-key": config["ELEVENLABS_API_KEY"], "content-type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            raw = response.read()
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:600]
-        if e.code == 401:
-            raise Stop(
-                "ElevenLabs rejected ELEVENLABS_API_KEY (HTTP 401).\n"
-                f"          Create a key at {DASHBOARD['api_keys']} with access to ElevenAgents, put it in .env,\n"
-                f"          and run again.\n          ElevenLabs said: {detail}"
-            ) from None
-        raise Stop(f"ElevenLabs API {method} {path} failed with HTTP {e.code}:\n          {detail}") from None
-    except urllib.error.URLError as e:
-        raise Stop(f"Could not reach the ElevenLabs API at {API}: {e.reason}. Check the network.") from None
-
-
-def load_elevenlabs_state() -> dict[str, Any]:
-    return json.loads(ELEVENLABS_STATE_FILE.read_text(encoding="utf-8")) if ELEVENLABS_STATE_FILE.exists() else {}
-
-
-def save_elevenlabs_state(state: dict[str, Any]) -> None:
-    ELEVENLABS_STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 def load_assemblyai_state() -> dict[str, Any]:
@@ -272,7 +228,7 @@ def choose_tunnel(config: dict[str, str], args: argparse.Namespace, problems: li
             problems.append(f"NGROK_STATIC_DOMAIN must be a bare hostname like name.ngrok-free.app (got {domain!r})")
         if shutil.which("ngrok") is None:
             problems.append(f"ngrok is not installed — {NGROK_INSTALL}")
-        # The URL is the reserved domain; it is the same on every run, which is what the ElevenLabs tools and
+        # The URL is the reserved domain; it is the same on every run, which is what the voice-agent tools and
         # webhook need.
         given = config.get("PREAUTH_PUBLIC_BASE_URL", "").strip().rstrip("/")
         if domain and is_set(config, "PREAUTH_PUBLIC_BASE_URL") and given != f"https://{domain}":
@@ -382,28 +338,25 @@ def preflight(config: dict[str, str], args: argparse.Namespace) -> None:
 
     problems = []
     voice_provider = (config.get("VOICE_PROVIDER") or "assemblyai").strip().lower()
-    if voice_provider not in {"assemblyai", "elevenlabs"}:
-        problems.append(f"VOICE_PROVIDER must be assemblyai or elevenlabs (got {voice_provider!r})")
-    config["VOICE_PROVIDER"] = voice_provider
+    if voice_provider != "assemblyai":
+        problems.append(f"VOICE_PROVIDER must be assemblyai (got {voice_provider!r})")
+    config["VOICE_PROVIDER"] = "assemblyai"
 
-    if voice_provider == "assemblyai":
-        for name in ("PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET", "PREAUTH_ASSEMBLYAI_MEDIA_SECRET"):
-            if not is_set(config, name):
-                remember_secret(config, name, secrets.token_urlsafe(32))
-                info(f"generated {name} (kept in .hosted/secrets.env)")
-        if not is_set(config, "ASSEMBLYAI_API_KEY"):
-            problems.append("ASSEMBLYAI_API_KEY is empty — create one in the AssemblyAI dashboard")
-        if not is_set(config, "PREAUTH_ASSEMBLYAI_VOICE_ID"):
-            problems.append("PREAUTH_ASSEMBLYAI_VOICE_ID is empty — select an English Voice Agent voice")
-        state = load_assemblyai_state().get("agents") or {}
-        for channel, name in (
-            ("browser", "PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID"),
-            ("phone", "PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID"),
-        ):
-            if not is_set(config, name) and isinstance(state.get(channel), str):
-                config[name] = state[channel]
-    elif not is_set(config, "ELEVENLABS_API_KEY"):
-        problems.append(f"ELEVENLABS_API_KEY is empty — create one at {DASHBOARD['api_keys']}")
+    for name in ("PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET", "PREAUTH_ASSEMBLYAI_MEDIA_SECRET"):
+        if not is_set(config, name):
+            remember_secret(config, name, secrets.token_urlsafe(32))
+            info(f"generated {name} (kept in .hosted/secrets.env)")
+    if not is_set(config, "ASSEMBLYAI_API_KEY"):
+        problems.append("ASSEMBLYAI_API_KEY is empty — create one in the AssemblyAI dashboard")
+    if not is_set(config, "PREAUTH_ASSEMBLYAI_VOICE_ID"):
+        problems.append("PREAUTH_ASSEMBLYAI_VOICE_ID is empty — select an English Voice Agent voice")
+    state = load_assemblyai_state().get("agents") or {}
+    for channel, name in (
+        ("browser", "PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID"),
+        ("phone", "PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID"),
+    ):
+        if not is_set(config, name) and isinstance(state.get(channel), str):
+            config[name] = state[channel]
     provider = choose_tunnel(config, args, problems)
     base_url = config.get("PREAUTH_PUBLIC_BASE_URL", "").strip().rstrip("/")
 
@@ -417,29 +370,21 @@ def preflight(config: dict[str, str], args: argparse.Namespace) -> None:
         raise Stop("Fix these in .env and run again:\n" + "\n".join(f"          - {p}" for p in problems))
     config["PREAUTH_PUBLIC_BASE_URL"] = base_url
     config["_TUNNEL"] = provider
-    if voice_provider == "elevenlabs" and not is_set(
-        config, "PREAUTH_ELEVENLABS_AGENT_ID"
-    ) and load_elevenlabs_state().get("agent_id"):
-        config["PREAUTH_ELEVENLABS_AGENT_ID"] = load_elevenlabs_state()["agent_id"]
     ok(f".env has everything this run needs (voice: {voice_provider}; tunnel: {provider})")
 
     # Fail fast on a bad key, before anything is started.
-    if voice_provider == "assemblyai":
-        try:
-            AssemblyAIClient(
-                config["ASSEMBLYAI_API_KEY"],
-                api_base=config.get("PREAUTH_ASSEMBLYAI_API_BASE", "https://agents.assemblyai.com"),
-            ).request("GET", "/v1/agents", query={"limit": 1})
-        except AssemblyAIError as exc:
-            raise Stop(f"AssemblyAI rejected or could not verify ASSEMBLYAI_API_KEY: {exc}") from None
-        ok("AssemblyAI accepted the API key")
-    else:
-        elevenlabs(config, "GET", "/v1/convai/agents?page_size=1")
-        ok("ElevenLabs accepted the API key")
+    try:
+        AssemblyAIClient(
+            config["ASSEMBLYAI_API_KEY"],
+            api_base=config.get("PREAUTH_ASSEMBLYAI_API_BASE", "https://agents.assemblyai.com"),
+        ).request("GET", "/v1/agents", query={"limit": 1})
+    except AssemblyAIError as exc:
+        raise Stop(f"AssemblyAI rejected or could not verify ASSEMBLYAI_API_KEY: {exc}") from None
+    ok("AssemblyAI accepted the API key")
     if provider == "ngrok":
         probe_ngrok(config)
 
-    for name in ("PREAUTH_VOICE_AGENT_TOKEN", "PREAUTH_GATEWAY_SECRET"):
+    for name in ("PREAUTH_VOICE_TOOL_TOKEN", "PREAUTH_GATEWAY_SECRET"):
         if not is_set(config, name):
             remember_secret(config, name, secrets.token_urlsafe(32))
             info(f"generated {name} (kept in .hosted/secrets.env)")
@@ -578,23 +523,6 @@ def verify(config: dict[str, str], label: str) -> None:
     banner(f"VERIFY ({label}): PASS — {summary}", "green")
 
 
-def setup_elevenlabs(config: dict[str, str]) -> dict[str, str]:
-    result = subprocess.run(
-        [sys.executable, "scripts/elevenlabs_setup.py"], cwd=ROOT, env=backend_env(config),
-        capture_output=True, text=True,
-    )
-    for line in (result.stdout + result.stderr).splitlines():
-        if line.startswith(("secret:", "tool:", "knowledge base:", "agent:")):
-            info(line)
-    if result.returncode != 0:
-        raise Stop(f"elevenlabs_setup.py failed:\n          {(result.stderr or result.stdout).strip()[-800:]}")
-    agent_id = load_elevenlabs_state().get("agent_id")
-    if not agent_id:
-        raise Stop("elevenlabs_setup.py finished but recorded no agent_id in .elevenlabs-state.json")
-    ok(f"agent {agent_id}: system prompt, 3 server tools, knowledge base, keyterm biasing")
-    return {"browser": agent_id, "phone": agent_id}
-
-
 def setup_assemblyai(config: dict[str, str]) -> dict[str, str]:
     result = subprocess.run(
         [sys.executable, "scripts/assemblyai_setup.py"],
@@ -619,87 +547,14 @@ def setup_assemblyai(config: dict[str, str]) -> dict[str, str]:
 
 
 def setup_provider(config: dict[str, str]) -> dict[str, str]:
-    return setup_assemblyai(config) if config["VOICE_PROVIDER"] == "assemblyai" else setup_elevenlabs(config)
-
-
-def register_webhook(config: dict[str, str], args: argparse.Namespace) -> bool:
-    """Returns True when the backend must be restarted to pick up a new signing secret."""
-    url = config["PREAUTH_PUBLIC_BASE_URL"] + ELEVENLABS_WEBHOOK_PATH
-    state = load_elevenlabs_state()
-    saved = state.get("post_call_webhook") or {}
-    have_secret = is_set(config, "PREAUTH_ELEVENLABS_WEBHOOK_SECRET")
-    restart = False
-
-    if saved.get("id") and have_secret:
-        if saved.get("url") != url:
-            elevenlabs(config, "PATCH", f"/v1/workspace/webhooks/{saved['id']}",
-                       {"settings": {"name": WEBHOOK_NAME, "webhook_url": url}})
-            info(f"webhook {saved['id']}: URL updated to {url}")
-        else:
-            info(f"webhook {saved['id']}: already registered for {url}")
-        webhook_id = saved["id"]
-    else:
-        created = elevenlabs(config, "POST", "/v1/workspace/webhooks",
-                             {"settings": {"auth_type": "hmac", "name": WEBHOOK_NAME, "webhook_url": url}})
-        webhook_id = created["webhook_id"]
-        # Saved before anything can stop the run, so a re-run reuses this webhook instead of creating another.
-        state["post_call_webhook"] = {"id": webhook_id, "url": url}
-        save_elevenlabs_state(state)
-        secret = created.get("webhook_secret")
-        if not secret:
-            secret = ask_for_webhook_secret(url)
-        remember_secret(config, "PREAUTH_ELEVENLABS_WEBHOOK_SECRET", secret)
-        info(f"webhook {webhook_id}: created for {url}; signing secret kept in .hosted/secrets.env")
-        restart = True
-    state["post_call_webhook"] = {"id": webhook_id, "url": url}
-    save_elevenlabs_state(state)
-
-    current = (elevenlabs(config, "GET", "/v1/convai/settings").get("webhooks") or {}).get("post_call_webhook_id")
-    if current and current != webhook_id and current not in state.get("previous_webhook_ids", []):
-        warn(f"this ElevenLabs workspace already sends post-call webhooks to another endpoint ({current}).")
-        info("The setting is workspace-wide: switching it moves every agent's transcripts here.")
-        if not confirm("Point the workspace's post-call webhook at this backend?", args):
-            raise Stop(
-                "Left the existing webhook alone. Without it, reviewers stay blocked (CALL_RECORD_PENDING).\n"
-                f"          Either re-run with --yes, or set it per agent at {DASHBOARD['agents_settings']}."
-            )
-    if current != webhook_id:
-        elevenlabs(config, "PATCH", "/v1/convai/settings",
-                   {"webhooks": {"post_call_webhook_id": webhook_id, "events": ["transcript"],
-                                 "transcript_format": "json"}})
-        state.setdefault("previous_webhook_ids", []).append(webhook_id)
-        save_elevenlabs_state(state)
-    ok(f"post-call transcripts are sent to {url}")
-    return restart
-
-
-def ask_for_webhook_secret(url: str) -> str:
-    """Manual fallback: ElevenLabs created the webhook but did not return its secret in the response."""
-    warn("ElevenLabs created the webhook but did not return its signing secret.")
-    info(f"Open {DASHBOARD['agents_settings']} → Post-call webhook, find the webhook for")
-    info(f"{url}, and copy its signing secret.")
-    if not sys.stdin.isatty():
-        raise Stop("Cannot prompt without a terminal. Put the secret in .env as "
-                   "PREAUTH_ELEVENLABS_WEBHOOK_SECRET and run again.")
-    while True:
-        value = getpass.getpass("          Paste the signing secret (input hidden): ").strip()
-        if value:
-            return value
-
-
-def confirm(question: str, args: argparse.Namespace) -> bool:
-    if args.yes:
-        return True
-    if not sys.stdin.isatty():
-        return False
-    return input(f"          {question} [y/N] ").strip().lower() in ("y", "yes")
+    return setup_assemblyai(config)
 
 
 def wire_phone_number(config: dict[str, str]) -> str | None:
-    """Inbound calls reach the selected agent through our own signed Twilio endpoint.
+    """Inbound calls reach AssemblyAI through our own signed Twilio endpoint.
 
-    In AssemblyAI mode the backend returns TwiML for a signed local Media Stream; the bridge then opens the stored
-    PCMU agent. The ElevenLabs rollback path keeps register-call. This check never places a call.
+    The backend returns TwiML for a signed local Media Stream; the bridge then opens the stored PCMU agent. This
+    check never places a call.
     """
     inbound = config["PREAUTH_PUBLIC_BASE_URL"] + TWILIO_INBOUND_PATH
     # An unsigned probe: 401 means configured and enforcing signatures; 503 names what is missing. No call is made.
@@ -708,8 +563,8 @@ def wire_phone_number(config: dict[str, str]) -> str | None:
         ok(f"inbound endpoint is live and verifying Twilio signatures: {inbound}")
     elif status == 503:
         missing = re.findall(
-            r"TWILIO_AUTH_TOKEN|PREAUTH_PUBLIC_BASE_URL|ELEVENLABS_API_KEY|PREAUTH_ELEVENLABS_AGENT_ID|"
-            r"ASSEMBLYAI_API_KEY|PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID|PREAUTH_ASSEMBLYAI_MEDIA_SECRET",
+            r"TWILIO_AUTH_TOKEN|PREAUTH_PUBLIC_BASE_URL|ASSEMBLYAI_API_KEY|"
+            r"PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID|PREAUTH_ASSEMBLYAI_MEDIA_SECRET",
             body,
         )
         warn(f"inbound calls are disabled until these are set: {', '.join(sorted(set(missing))) or 'see backend log'}")
@@ -748,7 +603,6 @@ def _post_status(url: str) -> tuple[int | None, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--yes", action="store_true", help="answer yes to confirmation prompts")
     parser.add_argument(
         "--no-tunnel", action="store_true",
         help="start no tunnel; PREAUTH_PUBLIC_BASE_URL already reaches this machine some other way",
@@ -780,27 +634,20 @@ def main() -> int:
         step("c", "Verifying the deployment through the public URL")
         verify(config, "initial")
 
-        provider_name = "AssemblyAI" if config["VOICE_PROVIDER"] == "assemblyai" else "ElevenLabs"
-        step("d", f"Configuring the {provider_name} voice agent")
+        provider_name = "AssemblyAI"
+        step("d", "Configuring the AssemblyAI voice agent")
         agent_ids = setup_provider(config)
-        if config["VOICE_PROVIDER"] == "assemblyai":
-            agent_changed = any(
-                config.get(name) != agent_ids[channel]
-                for channel, name in (
-                    ("browser", "PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID"),
-                    ("phone", "PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID"),
-                )
+        agent_changed = any(
+            config.get(name) != agent_ids[channel]
+            for channel, name in (
+                ("browser", "PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID"),
+                ("phone", "PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID"),
             )
-            config["PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID"] = agent_ids["browser"]
-            config["PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID"] = agent_ids["phone"]
-            webhook_changed = False  # assemblyai_setup.py owns per-agent subscriptions idempotently
-            step("e", "Applying AssemblyAI agent ids and webhook subscriptions")
-        else:
-            agent_changed = config.get("PREAUTH_ELEVENLABS_AGENT_ID") != agent_ids["phone"]
-            config["PREAUTH_ELEVENLABS_AGENT_ID"] = agent_ids["phone"]
-            step("e", "Registering the ElevenLabs post-call webhook")
-            webhook_changed = register_webhook(config, args)
-        if webhook_changed or agent_changed:
+        )
+        config["PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID"] = agent_ids["browser"]
+        config["PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID"] = agent_ids["phone"]
+        step("e", "Applying AssemblyAI agent ids and webhook subscriptions")
+        if agent_changed:
             info("restarting the backend so it picks up provider configuration")
             processes.stop("backend")
             start_backend(config, processes)
@@ -811,12 +658,8 @@ def main() -> int:
         number = wire_phone_number(config)
 
         step("g", "Summary")
-        if config["VOICE_PROVIDER"] == "assemblyai":
-            talk = config["PREAUTH_PUBLIC_BASE_URL"] + "/voice"
-            webhook_path = ASSEMBLYAI_WEBHOOK_PATH
-        else:
-            talk = f"https://elevenlabs.io/app/talk-to?agent_id={agent_ids['browser']}"
-            webhook_path = ELEVENLABS_WEBHOOK_PATH
+        talk = config["PREAUTH_PUBLIC_BASE_URL"] + "/voice"
+        webhook_path = ASSEMBLYAI_WEBHOOK_PATH
         banner("LIVE — Sawt Assurance pre-authorisation line", "green")
         print(f"  Voice provider    {provider_name}")
         print(f"  Backend          {config['PREAUTH_PUBLIC_BASE_URL']}   (API docs: /docs)")

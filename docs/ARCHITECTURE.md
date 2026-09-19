@@ -57,7 +57,7 @@ engine and one case lifecycle, and a voice provider does not get its own.
 | Decision / recommendation | `recommendation/engine.py` |
 | Human approval | `application/review_service.py`, `api/routes/review.py` |
 | Audit | `AuditRecorder` in `application/unit_of_work.py`; `audit_events` (append-only) |
-| Voice channel | `api/routes/assemblyai.py`, `api/assemblyai_bridge.py`, `api/routes/voice.py` (rollback), `api/routes/local.py`, `application/voice_channel_service.py` |
+| Voice channel | `api/routes/assemblyai.py`, `api/assemblyai_bridge.py`, `api/routes/voice_tools.py` (diagnostics), `api/routes/local.py`, `application/voice_channel_service.py` |
 
 `tests/unit/test_architecture.py` enforces the dependency direction: `domain`, `rules` and `recommendation` import
 nothing from outer layers or frameworks, and routes never touch the database or the rules directly.
@@ -110,13 +110,13 @@ actor types may perform it) and writes a `CASE_STATUS_CHANGED` audit event.
    `MEDICAL_DIRECTOR` for escalations), assignment of the case, a rationale, and a reference to the current
    recommendation.
 3. **Agent boundary.** Three tools, none of which decides. All voice channels authenticate as `VOICE_AGENT`
-   (`assemblyai-agent`, rollback `elevenlabs-agent`, or `local-agent`), which the review API rejects. The local model is offered exactly the
+   (`assemblyai-agent` or `local-agent`), which the review API rejects. The local model is offered exactly the
    toolbox's tools, so asking it to approve something returns `TOOL_NOT_FOUND`.
 4. **Verification before cover.** `check_coverage_rule` requires a `verification_id` from a successful
    `verify_caller`; an unverified or lapsed caller cannot get a coverage answer at all.
 5. **Transcript before sign-off.** A case touched by a voice conversation cannot receive any human decision until
    that call's transcript is stored (`CALL_RECORD_PENDING`) — retrieved from the AssemblyAI completed-session
-   timeline, delivered by the rollback webhook, or written by the local process when the call ends. All produce
+   timeline, delivered by the signed AssemblyAI webhook, or written by the local process when the call ends. All produce
    the same immutable `call_records` row, told apart
    by `platform`.
 6. **Database.** A check constraint ties each decision to its resulting status; recommendations and decisions are
@@ -182,9 +182,9 @@ optimistic locking and returned as `CONCURRENT_MODIFICATION`.
 5. **One procedure per case.** Multi-line requests need a case per line today.
 6. **Rules content.** The ruleset is illustrative and operates on synthetic data. Real clinical policy would
    replace it, most likely with a rule-authoring workflow rather than code changes.
-7. **Voice channel.** AssemblyAI tool correlation uses the provider-issued session id. The rollback HTTP tool
-   transport still trusts `X-Conversation-ID`. If completed-session ingestion is misconfigured, reviewers are
-   blocked by design until webhook delivery or reconciliation succeeds.
+7. **Voice channel.** AssemblyAI tool correlation uses the provider-issued session id. The provider-neutral
+   diagnostic transport accepts `X-Conversation-ID` only for deployment checks. If completed-session ingestion
+   is misconfigured, reviewers are blocked by design until webhook delivery or reconciliation succeeds.
 8. **Live provider validation.** The full offline contract suite passes, but voice quality, real audio latency,
    identifier accuracy, rate limits and concurrent-call behavior need acceptance with project credentials.
 9. **Sensitive data.** Audit data and call transcripts contain clinical free text. Retention, access control and

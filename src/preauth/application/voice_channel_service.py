@@ -14,34 +14,12 @@ from preauth.application.unit_of_work import UnitOfWork
 from preauth.domain.actors import SYSTEM_ACTOR
 from preauth.domain.enums import AuditEventType
 from preauth.domain.errors import NotFoundError
-from preauth.infrastructure import elevenlabs_signature
 from preauth.infrastructure.clock import Clock, new_id
 from preauth.infrastructure.db.models import CallRecord, VoiceToolInvocation
 from preauth.domain.actors import Actor
 from preauth.infrastructure.observability import actor_var, bind_case_id, conversation_id_var, request_id_var
 
 logger = logging.getLogger("preauth.voice")
-
-
-class _Lenient(BaseModel):
-    """External payload: ignore fields we do not use, so platform additions do not break ingestion."""
-
-    model_config = ConfigDict(extra="ignore")
-
-
-class PostCallData(_Lenient):
-    agent_id: str
-    conversation_id: str
-    status: str | None = None
-    transcript: list[dict[str, Any]] = []
-    metadata: dict[str, Any] = {}
-    analysis: dict[str, Any] | None = None
-
-
-class PostCallEvent(_Lenient):
-    type: str
-    event_timestamp: int | None = None
-    data: dict[str, Any]
 
 
 class PostCallOutcome(BaseModel):
@@ -66,17 +44,12 @@ def pending_conversation_ids(uow: UnitOfWork, case_id: str) -> list[str]:
 
 
 class VoiceChannelService:
-    PLATFORM = "elevenlabs"
     ASSEMBLYAI_PLATFORM = "assemblyai"
     LOCAL_PLATFORM = "local"
 
     def __init__(self, session_factory: sessionmaker[Session], clock: Clock):
         self._session_factory = session_factory
         self._clock = clock
-
-    @staticmethod
-    def verify_webhook_signature(raw_body: bytes, signature_header: str | None, secret: str) -> None:
-        elevenlabs_signature.verify(raw_body, signature_header, secret)
 
     def record_tool_invocation(
         self, *, tool_name: str, case_id: str | None, succeeded: bool, error_code: str | None
@@ -242,26 +215,3 @@ class VoiceChannelService:
             return PostCallOutcome(
                 accepted=True, detail="Recorded", call_record_id=record.id, linked_case_ids=case_ids
             )
-
-    def record_post_call(self, event: PostCallEvent) -> PostCallOutcome:
-        if event.type != "post_call_transcription":
-            logger.info("post_call_event_ignored", extra={"event_type": event.type})
-            return PostCallOutcome(accepted=False, detail=f"Event type {event.type!r} is not stored")
-
-        data = PostCallData.model_validate(event.data)
-        analysis = data.analysis or {}
-        duration = data.metadata.get("call_duration_secs")
-        return self._record_call(
-            conversation_id=data.conversation_id,
-            agent_id=data.agent_id,
-            platform=self.PLATFORM,
-            status=data.status,
-            call_duration_secs=duration if isinstance(duration, int) else None,
-            summary=analysis.get("transcript_summary"),
-            call_successful=analysis.get("call_successful"),
-            transcript=data.transcript,
-            analysis=analysis,
-            metadata=data.metadata,
-            event_timestamp=event.event_timestamp,
-            log_event="call_recorded",
-        )

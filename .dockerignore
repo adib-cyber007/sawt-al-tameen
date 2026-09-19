@@ -4,7 +4,6 @@
 .pytest_cache
 *.db
 .env
-.elevenlabs-state.json
 .assemblyai-state.json
 tests
 docs

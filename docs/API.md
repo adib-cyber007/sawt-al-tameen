@@ -358,13 +358,13 @@ Invokes one tool. The body is the tool's arguments object and is validated stric
 | 422 | `ErrorResponse` | REQUEST_VALIDATION_FAILED / TOOL_ARGUMENTS_INVALID / UNKNOWN_PROVIDER / MEMBER_NOT_VERIFIED / ... |
 | 500 | `ErrorResponse` | INTERNAL_ERROR / INTEGRITY_VIOLATION |
 
-## Voice channel (ElevenLabs)
+## Voice channel diagnostics
 
-### `POST /api/v1/voice/tools/{tool_name}` — Voice platform server-tool call
+### `POST /api/v1/voice/tools/{tool_name}` — Invoke a voice tool for deployment diagnostics
 
-Invokes one agent tool on behalf of the voice platform. The body is the tool's flat parameter object (see `scripts/elevenlabs_setup.py` or `preauth.agent_tools.elevenlabs`). Empty strings and nulls are treated as omitted. Business failures return HTTP 200 with `ok=false`, a stable `error.code`, and `guidance` the agent can act on, because the model must be able to recover mid-call. Unexpected failures return the standard 500 envelope. Calls carrying `X-Conversation-ID` are linked to the cases they touch.
+Invokes one provider-neutral voice tool and links the optional `X-Conversation-ID` to any case it touches. This endpoint is used by deployment verification; live AssemblyAI sessions execute the same gateway directly over their server-owned WebSocket.
 
-**Authorisation:** Header `Authorization: Bearer <PREAUTH_VOICE_AGENT_TOKEN>`. Acts as actor `VOICE_AGENT`.
+**Authorisation:** Header `Authorization: Bearer <PREAUTH_VOICE_TOOL_TOKEN>`.
 
 **State transitions:** Those of the underlying tool. Never `APPROVED` or `DENIED`.
 
@@ -376,25 +376,6 @@ Invokes one agent tool on behalf of the voice platform. The body is the tool's f
 |---|---|---|
 | 200 | `VoiceToolResponse` | Successful Response |
 | 401 | `ErrorResponse` | VOICE_TOKEN_INVALID |
-| 422 | `HTTPValidationError` | Validation Error |
-| 500 | `ErrorResponse` | INTERNAL_ERROR |
-| 503 | `ErrorResponse` | CHANNEL_NOT_CONFIGURED |
-
-### `POST /api/v1/voice/elevenlabs/post-call` — ElevenLabs post-call webhook
-
-Receives `post_call_transcription` events, stores the transcript and analysis as an immutable call record, and adds a `CALL_RECORDED` audit event to every case the conversation touched. Idempotent per conversation (platform retries are acknowledged, not duplicated). Other event types are acknowledged and ignored.
-
-**Authorisation:** Header `elevenlabs-signature` (HMAC-SHA256 with `PREAUTH_ELEVENLABS_WEBHOOK_SECRET`).
-
-**State transitions:** None. Human sign-off on affected cases becomes possible once all their calls are recorded.
-
-**Request body:** —
-
-| Status | Response | Error codes / meaning |
-|---|---|---|
-| 200 | `PostCallOutcome` | Successful Response |
-| 400 | `ErrorResponse` | WEBHOOK_PAYLOAD_INVALID |
-| 401 | `ErrorResponse` | WEBHOOK_SIGNATURE_INVALID |
 | 422 | `HTTPValidationError` | Validation Error |
 | 500 | `ErrorResponse` | INTERNAL_ERROR |
 | 503 | `ErrorResponse` | CHANNEL_NOT_CONFIGURED |
@@ -423,11 +404,11 @@ Receives signed `session.completed` notifications, fetches the authoritative ses
 
 ### `POST /api/v1/voice/twilio/inbound` — Twilio incoming-call webhook
 
-Set as the Voice webhook of your Twilio number (A call comes in → Webhook → HTTP POST). Accepts Twilio's form-encoded call parameters and returns `application/xml` TwiML for the selected hosted voice provider. ElevenLabs uses its register-call API; AssemblyAI receives a signed, short-lived WebSocket media URL.
+Set as the Voice webhook of your Twilio number (A call comes in → Webhook → HTTP POST). Accepts Twilio's form-encoded call parameters and returns `application/xml` TwiML containing a signed, short-lived AssemblyAI media WebSocket URL.
 
 **Authorisation:** Header `X-Twilio-Signature`, validated with `TWILIO_AUTH_TOKEN` against `PREAUTH_PUBLIC_BASE_URL` + this path. Provider-specific credentials and agent IDs must also be configured.
 
-**State transitions:** None. The call uses the same business tools and transcript safety boundary for either provider.
+**State transitions:** None. The call uses the AssemblyAI business tools and transcript safety boundary.
 
 **Request body:** —
 

@@ -30,10 +30,7 @@ from preauth.domain.errors import (
 
 logger = logging.getLogger("preauth.voice.gateway")
 
-ELEVENLABS_AGENT_ACTOR = Actor(ActorType.VOICE_AGENT, "elevenlabs-agent")
 ASSEMBLYAI_AGENT_ACTOR = Actor(ActorType.VOICE_AGENT, "assemblyai-agent")
-# Backwards-compatible name for callers that predate the provider adapter.
-VOICE_PLATFORM_ACTOR = ELEVENLABS_AGENT_ACTOR
 # The local channel is the same kind of actor with a different name: still VOICE_AGENT, so the review API
 # rejects it exactly as it rejects the hosted agent.
 LOCAL_AGENT_ACTOR = Actor(ActorType.VOICE_AGENT, "local-agent")
@@ -79,7 +76,7 @@ def _case_id_of(arguments: dict[str, Any], result: dict[str, Any] | None) -> str
 
 class VoiceToolGateway:
     def __init__(
-        self, services: ApplicationServices, toolbox: AgentToolbox, actor: Actor = VOICE_PLATFORM_ACTOR
+        self, services: ApplicationServices, toolbox: AgentToolbox, actor: Actor = ASSEMBLYAI_AGENT_ACTOR
     ):
         if actor.type is not ActorType.VOICE_AGENT:
             raise AuthorizationError(

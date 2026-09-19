@@ -209,8 +209,8 @@ Events: `conversation_started`, `stt_completed`, `llm_started`, `tool_called`, `
 | `PREAUTH_LOCAL_TTS_VOICE` | unset | path to a Piper `.onnx` |
 | `PREAUTH_LOCAL_HOST` / `PREAUTH_LOCAL_PORT` | `127.0.0.1` / `8000` | |
 
-Local mode requires no hosted-provider credential, public URL, webhook/media secret or voice-agent token. In
-particular, it does not use `ASSEMBLYAI_API_KEY` or the retained ElevenLabs rollback credentials.
+Local mode requires no hosted-provider credential, public URL, webhook/media secret or voice-tool token. In
+particular, it does not use `ASSEMBLYAI_API_KEY` or any hosted AssemblyAI agent configuration.
 
 ## Offline operation
 

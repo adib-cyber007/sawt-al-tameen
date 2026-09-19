@@ -800,3 +800,49 @@ retained in CI only while that implementation remains the pre-acceptance rollbac
 Contract-audit verification: **358 tests passed**, the deterministic harness passed **5 scenarios / 30 checks**,
 the 12-file catalogue consistency check passed, and generated API documentation was current on 2026-09-19. The
 six warnings remained limited to the known SQLAlchemy/SQLite Python 3.12 deprecation and local pytest-cache issue.
+
+## Phase 6 — ElevenLabs removal and AssemblyAI-only cutover
+
+### Decision
+
+On 2026-09-20, the stakeholder explicitly authorised removing Arabic support and every ElevenLabs runtime,
+service, configuration and fallback before live AssemblyAI acceptance. AssemblyAI is now the sole hosted voice
+provider. Historical ElevenLabs references earlier in this file remain only as migration audit evidence.
+
+### Removed
+
+- Deleted the ElevenLabs setup/provisioning script, tool adapter, post-call route, webhook-signature verifier,
+  Twilio register-call client, provider-specific integration tests and rollback state-file handling.
+- Removed ElevenLabs API keys, agent ids, webhook secrets, provider/runtime enum values and selection branches
+  from settings, hosted startup, Twilio inbound routing, deployment verification, CI and environment templates.
+- Removed the provider-named voice actor and rollback webhook/API documentation. Regenerated OpenAPI and the
+  Markdown API reference from the AssemblyAI-only application.
+- Renamed the retained deployment-check credential to `PREAUTH_VOICE_TOOL_TOKEN`. Its HTTP endpoint is explicitly
+  diagnostic; production AssemblyAI tools continue to execute through the server-owned WebSocket gateway.
+
+### Structure retained
+
+The migration changes only the hosted voice transport and provider boundary. Case intake, caller verification,
+the three-tool contract, rule evaluation, recommendations, human-only approval/denial, transcript-before-sign-off,
+audit recording, database models, reviewer APIs, local mode and business workflow remain shared and unchanged.
+AssemblyAI and local sessions still enter the same `VoiceToolGateway`, `AgentToolbox` and application services.
+
+### Validation
+
+- Repository search found no active ElevenLabs reference outside this historical migration log.
+- The supplied `ASSEMBLYAI_API_KEY` was accepted by a read-only `GET /v1/agents` request; the key was not printed.
+- Python compilation completed successfully.
+- Complete suite: **334 tests passed** on 2026-09-20. The lower count reflects deletion of obsolete ElevenLabs
+  tests, not lost AssemblyAI or business-rule coverage. Six warnings were the existing SQLite datetime-adapter
+  deprecation and local pytest-cache warning.
+- Deterministic calls: **5 scenarios / 30 checks passed**.
+- AssemblyAI provisioning dry-run produced the expected English-only 24 kHz PCM browser agent and 8 kHz PCMU
+  phone agent; generated API docs and all 12 knowledge-base files passed consistency checks.
+- `git diff --check` passed after cleanup.
+
+### Remaining live acceptance inputs
+
+The API key alone is insufficient to create or exercise live stored agents. Set an approved
+`PREAUTH_ASSEMBLYAI_VOICE_ID` and a stable `PREAUTH_PUBLIC_BASE_URL`; Twilio calling additionally needs
+`TWILIO_AUTH_TOKEN` and `TWILIO_PHONE_NUMBER`. Until then, real voice quality, latency, interruption and phone-call
+measurements remain pending. No ElevenLabs code path will be used if AssemblyAI is unavailable.

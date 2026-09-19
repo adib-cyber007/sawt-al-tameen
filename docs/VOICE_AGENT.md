@@ -159,10 +159,4 @@ Real credentials and representative English audio are still required to accept:
 - concurrent-call limits, rate limiting, webhook delay and reconciliation;
 - transcription accuracy versus the pre-migration baseline.
 
-Record measured results in `MIGRATION_LOG.md` before removing the rollback provider.
-
-## Rollback
-
-Set `VOICE_PROVIDER=elevenlabs`, restore the old ElevenLabs variables/webhook target, and restart. The legacy
-adapter, setup script, webhook endpoint, tests, and state file remain during live acceptance. Rollback does not
-delete or modify AssemblyAI agents or subscriptions.
+Record measured results in `MIGRATION_LOG.md` as deployment acceptance evidence.

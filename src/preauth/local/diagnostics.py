@@ -223,16 +223,16 @@ def check_port(settings: LocalSettings) -> Check:
 
 
 def check_no_paid_credentials_required(settings: LocalSettings) -> Check:
-    """Local mode must start with no ElevenLabs key, no public URL and no webhook secret."""
+    """Local mode requires no AssemblyAI key, public URL or webhook secret."""
     import os
 
     present = [
         name
-        for name in ("ELEVENLABS_API_KEY", "PREAUTH_PUBLIC_BASE_URL", "PREAUTH_ELEVENLABS_WEBHOOK_SECRET")
+        for name in ("ASSEMBLYAI_API_KEY", "PREAUTH_PUBLIC_BASE_URL", "PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET")
         if (os.environ.get(name) or "").strip()
     ]
     if present:
-        return _ok("credentials", "local mode needs none of these; set for ElevenLabs mode: " + ", ".join(present))
+        return _ok("credentials", "local mode ignores hosted credentials: " + ", ".join(present))
     return _ok("credentials", "no paid API credentials are set, and local mode needs none")
 
 

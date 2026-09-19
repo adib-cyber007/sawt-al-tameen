@@ -430,7 +430,7 @@ def test_no_credential_is_written_to_the_log(local, caplog):
         harness.runtime.finish(conversation)
 
     text = "\n".join(r.getMessage() + str(getattr(r, "__dict__", {})) for r in caplog.records)
-    for forbidden in ("ELEVENLABS_API_KEY", "webhook_secret", "gateway_secret", "Bearer "):
+    for forbidden in ("ASSEMBLYAI_API_KEY", "webhook_secret", "gateway_secret", "Bearer "):
         assert forbidden not in text
 
 

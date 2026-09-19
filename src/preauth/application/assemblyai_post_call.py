@@ -2,7 +2,7 @@
 
 The webhook is a notification, not the transcript itself. The handler verifies the raw delivery, fetches the
 authoritative session, downloads its short-lived timeline artifact, normalizes it, and writes through the same
-append-only call-record service used by ElevenLabs and local mode. Missing artifacts are a retryable condition:
+append-only call-record service used by local mode. Missing artifacts are a retryable condition:
 AssemblyAI commonly emits ``session.completed`` before post-call artifacts are ready.
 """
 

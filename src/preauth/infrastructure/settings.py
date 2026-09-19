@@ -7,15 +7,12 @@ class RuntimeMode(StrEnum):
     """Which interaction channel this process serves. The application layer below is identical for both."""
 
     HOSTED = "hosted"
-    # Accepted only for deployments upgrading from the pre-migration configuration.
-    ELEVENLABS = "elevenlabs"
     LOCAL = "local"
 
 
 class VoiceProvider(StrEnum):
-    """Hosted voice platform selected during the migration window."""
+    """Hosted voice platform."""
 
-    ELEVENLABS = "elevenlabs"
     ASSEMBLYAI = "assemblyai"
 
 
@@ -39,19 +36,15 @@ class Settings:
     # When set, every /api/v1 route except the voice channel requires header X-Gateway-Secret with this value.
     # Stands in for the authenticating gateway when the service is exposed on a public URL.
     gateway_secret: str | None = None
-    # Bearer token the voice platform presents on server-tool calls. Voice tools are disabled when unset.
-    voice_agent_token: str | None = None
-    # AssemblyAI is the hosted default. ElevenLabs remains selectable as a rollback during live acceptance.
+    # Optional operator-only token for the deployment diagnostic tool transport.
+    voice_tool_token: str | None = field(default=None, repr=False)
+    # Kept as an enum so adding another provider later remains an explicit architecture change.
     voice_provider: VoiceProvider = VoiceProvider.ASSEMBLYAI
-    # HMAC secret of the ElevenLabs post-call webhook. The webhook endpoint is disabled when unset.
-    elevenlabs_webhook_secret: str | None = None
     # Which voice channel this process exposes. ``local`` additionally mounts the local agent and its browser UI;
     # it never changes the rules, cases, review or audit layers.
     runtime_mode: RuntimeMode = RuntimeMode.HOSTED
-    # Inbound Twilio calls (register-call). The endpoint is disabled unless all four are set; secrets stay out of repr.
+    # Inbound Twilio calls. The endpoint is disabled until the AssemblyAI media bridge is fully configured.
     twilio_auth_token: str | None = field(default=None, repr=False)
-    elevenlabs_api_key: str | None = field(default=None, repr=False)
-    elevenlabs_agent_id: str | None = None
     assemblyai_api_key: str | None = field(default=None, repr=False)
     assemblyai_webhook_secret: str | None = field(default=None, repr=False)
     # Signs the short-lived URL embedded in Twilio's <Stream>. This is deliberately separate from the
@@ -80,13 +73,10 @@ class Settings:
             database_url=normalise_database_url(os.environ.get("PREAUTH_DATABASE_URL", cls.database_url)),
             log_level=os.environ.get("PREAUTH_LOG_LEVEL", cls.log_level),
             gateway_secret=_optional("PREAUTH_GATEWAY_SECRET"),
-            voice_agent_token=_optional("PREAUTH_VOICE_AGENT_TOKEN"),
+            voice_tool_token=_optional("PREAUTH_VOICE_TOOL_TOKEN"),
             voice_provider=_voice_provider(),
-            elevenlabs_webhook_secret=_optional("PREAUTH_ELEVENLABS_WEBHOOK_SECRET"),
             runtime_mode=_runtime_mode(),
             twilio_auth_token=_optional("TWILIO_AUTH_TOKEN"),
-            elevenlabs_api_key=_optional("ELEVENLABS_API_KEY"),
-            elevenlabs_agent_id=_optional("PREAUTH_ELEVENLABS_AGENT_ID"),
             assemblyai_api_key=_optional("ASSEMBLYAI_API_KEY"),
             assemblyai_webhook_secret=_optional("PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET"),
             assemblyai_media_secret=_optional("PREAUTH_ASSEMBLYAI_MEDIA_SECRET"),

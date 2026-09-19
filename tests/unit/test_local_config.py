@@ -7,7 +7,7 @@ from preauth.local.config import LlmProvider, LocalSettings, SttProvider, TtsPro
 
 
 def test_defaults_to_the_assemblyai_hosted_channel(monkeypatch):
-    for name in ("PREAUTH_RUNTIME_MODE", "PREAUTH_GATEWAY_SECRET", "PREAUTH_VOICE_AGENT_TOKEN", "VOICE_PROVIDER"):
+    for name in ("PREAUTH_RUNTIME_MODE", "PREAUTH_GATEWAY_SECRET", "PREAUTH_VOICE_TOOL_TOKEN", "VOICE_PROVIDER"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings.from_env()
     assert settings.runtime_mode is RuntimeMode.HOSTED
@@ -46,7 +46,7 @@ def test_assemblyai_hosted_provider_is_selected_independently(monkeypatch):
 
 def test_an_unknown_voice_provider_is_rejected(monkeypatch):
     monkeypatch.setenv("VOICE_PROVIDER", "azure")
-    with pytest.raises(ValueError, match="elevenlabs, assemblyai"):
+    with pytest.raises(ValueError, match="assemblyai"):
         Settings.from_env()
 
 
@@ -57,17 +57,14 @@ def test_local_mode_is_selected_by_one_variable(monkeypatch):
 
 def test_an_unknown_runtime_mode_is_rejected_with_the_allowed_values(monkeypatch):
     monkeypatch.setenv("PREAUTH_RUNTIME_MODE", "azure")
-    with pytest.raises(ValueError, match="hosted, elevenlabs, local"):
+    with pytest.raises(ValueError, match="hosted, local"):
         Settings.from_env()
 
 
-def test_local_mode_requires_no_elevenlabs_credentials(monkeypatch):
+def test_local_mode_requires_no_hosted_credentials(monkeypatch):
     """Requirement, not coincidence: a local deployment must start with no paid-provider configuration."""
     for name in (
-        "ELEVENLABS_API_KEY",
         "PREAUTH_PUBLIC_BASE_URL",
-        "PREAUTH_ELEVENLABS_WEBHOOK_SECRET",
-        "PREAUTH_VOICE_AGENT_TOKEN",
         "ASSEMBLYAI_API_KEY",
         "PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET",
         "PREAUTH_ASSEMBLYAI_MEDIA_SECRET",
@@ -77,11 +74,9 @@ def test_local_mode_requires_no_elevenlabs_credentials(monkeypatch):
 
     settings = Settings.from_env()
     assert settings.local_mode
-    assert settings.elevenlabs_webhook_secret is None
     assert settings.assemblyai_api_key is None
     assert settings.assemblyai_webhook_secret is None
     assert settings.assemblyai_media_secret is None
-    assert settings.voice_agent_token is None
     assert settings.database_url.startswith("sqlite:///")
     # And nothing in local mode's own configuration names a hosted provider.
     assert LocalSettings.from_env().llm_base_url.startswith("http://localhost")

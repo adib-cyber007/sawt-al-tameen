@@ -9,7 +9,7 @@ from preauth.agent_tools.toolbox import AgentToolbox
 from preauth.agent_tools.voice_gateway import ASSEMBLYAI_AGENT_ACTOR, VoiceToolGateway
 from preauth.api.errors import install_error_handlers
 from preauth.api.middleware import RequestContextMiddleware
-from preauth.api.routes import agent, assemblyai, cases, review, twilio, voice
+from preauth.api.routes import agent, assemblyai, cases, review, twilio, voice_tools
 from preauth.application.services import ApplicationServices
 from preauth.application.assemblyai_post_call import AssemblyAIPostCallService
 from preauth.application.twilio_inbound_service import TwilioInboundService
@@ -60,7 +60,7 @@ def create_app(
     app.include_router(cases.router)
     app.include_router(review.router)
     app.include_router(agent.router)
-    app.include_router(voice.router)
+    app.include_router(voice_tools.router)
     app.include_router(assemblyai.router)
     app.state.twilio_inbound = TwilioInboundService.from_settings(app.state.settings)
     app.include_router(twilio.router)

@@ -155,7 +155,7 @@ provider, then run one command:
 
 It starts the backend and a stable HTTPS tunnel, runs deployment checks, creates or updates separate 24 kHz browser
 and 8 kHz PCMU phone agents, registers signed completed-session webhooks, and prints the `/voice` test page. A
-second run updates the same resources. ElevenLabs remains available only as a rollback flag during live acceptance.
+second run updates the same resources. AssemblyAI is the sole hosted voice provider.
 
 Guides: [local mode](docs/LOCAL_MODE.md) · [hosted deployment](docs/DEPLOYMENT.md#one-command-hosted-mode)
 

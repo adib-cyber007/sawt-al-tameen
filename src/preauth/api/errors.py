@@ -20,14 +20,12 @@ from preauth.domain.errors import (
     OperationNotAllowedError,
     ValidationFailedError,
 )
-from preauth.infrastructure.elevenlabs_signature import WebhookSignatureError
 from preauth.infrastructure.observability import case_id_var, request_id_var
 
 logger = logging.getLogger("preauth.api.errors")
 
 STATUS_BY_ERROR: list[tuple[type[DomainError], int]] = [
     (ActorRequiredError, 401),
-    (WebhookSignatureError, 401),
     (AuthorizationError, 403),
     (NotFoundError, 404),
     (InvalidStateTransitionError, 409),

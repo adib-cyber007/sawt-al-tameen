@@ -1,10 +1,9 @@
-"""Transport for inbound calls on our own Twilio number. Thin: see the provider-aware service."""
+"""Transport for inbound calls on our own Twilio number. Thin: see the AssemblyAI media service."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import Response
-from starlette.concurrency import run_in_threadpool
 
 from preauth.api.errors import ErrorResponse
 from preauth.api.routes.cases import _doc
@@ -18,11 +17,11 @@ router = APIRouter(tags=["Voice channel (Twilio inbound)"])
     summary="Twilio incoming-call webhook",
     description=_doc(
         "Set as the Voice webhook of your Twilio number (A call comes in → Webhook → HTTP POST). Accepts Twilio's "
-        "form-encoded call parameters and returns `application/xml` TwiML for the selected hosted voice provider. "
-        "ElevenLabs uses its register-call API; AssemblyAI receives a signed, short-lived WebSocket media URL.",
+        "form-encoded call parameters and returns `application/xml` TwiML containing a signed, short-lived "
+        "AssemblyAI media WebSocket URL.",
         "Header `X-Twilio-Signature`, validated with `TWILIO_AUTH_TOKEN` against `PREAUTH_PUBLIC_BASE_URL` + this "
         "path. Provider-specific credentials and agent IDs must also be configured.",
-        "None. The call uses the same business tools and transcript safety boundary for either provider.",
+        "None. The call uses the AssemblyAI business tools and transcript safety boundary.",
     ),
     responses={
         200: {"content": {"application/xml": {}}, "description": "TwiML for Twilio"},
@@ -38,7 +37,5 @@ async def twilio_inbound(
 ) -> Response:
     service: TwilioInboundService = request.app.state.twilio_inbound
     raw = await request.body()
-    # ElevenLabs register-call is blocking network I/O; AssemblyAI token/TwiML generation is cheap but shares
-    # this provider-neutral path.
-    result = await run_in_threadpool(service.handle, raw, x_twilio_signature, request.url.query)
+    result = service.handle(raw, x_twilio_signature, request.url.query)
     return Response(content=result.twiml, media_type="application/xml")

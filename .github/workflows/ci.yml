@@ -47,8 +47,6 @@ jobs:
       - run: uv run python scripts/export_api_docs.py --check
       - run: uv run python scripts/generate_uae_knowledge_base.py --check
       - run: uv run python scripts/assemblyai_setup.py --dry-run > /dev/null
-      # Retained only while the migration rollback path exists.
-      - run: uv run python scripts/elevenlabs_setup.py --dry-run > /dev/null
 
   simulations:
     name: scripted call simulations
@@ -74,7 +72,7 @@ jobs:
           enable-cache: true
       # `local` only: no model is downloaded, and the voice extras are not needed to prove the wiring.
       - run: uv sync --frozen --extra local
-      # Deliberately unset throughout: all AssemblyAI/ElevenLabs keys, public URL and webhook/media secrets.
+      # Deliberately unset throughout: all AssemblyAI keys, public URL and webhook/media secrets.
       - name: Migrate, seed and diagnose
         run: |
           uv run alembic upgrade head
@@ -117,7 +115,7 @@ jobs:
         run: |
           docker run -d --name preauth-ci -p 7860:7860 \
             -e PREAUTH_DATABASE_URL=sqlite:////tmp/preauth.db \
-            -e PREAUTH_VOICE_AGENT_TOKEN=ci-token \
+            -e PREAUTH_VOICE_TOOL_TOKEN=ci-token \
             preauth:ci
           for i in $(seq 1 60); do curl -sf localhost:7860/health && break; sleep 2; done
           curl -sf localhost:7860/health | grep -q '"ok"'

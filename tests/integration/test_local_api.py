@@ -32,22 +32,21 @@ def test_local_routes_are_absent_unless_the_process_runs_in_local_mode(services)
     with TestClient(create_app(services)) as client:
         assert client.post("/api/v1/local/conversations").status_code == 404
         assert client.get("/local").status_code == 404
-        # The ElevenLabs channel is untouched and still present.
-        assert "/api/v1/voice/tools/{tool_name}" in client.app.openapi()["paths"]
+        assert "/api/v1/voice/assemblyai/post-call" in client.app.openapi()["paths"]
 
 
-def test_local_mode_starts_with_no_elevenlabs_credentials(local_client):
+def test_local_mode_starts_with_no_hosted_credentials(local_client):
     """Acceptance criterion: no API key, no public URL, no webhook secret, no telephony."""
     settings = Settings(runtime_mode=RuntimeMode.LOCAL)
-    assert (settings.voice_agent_token, settings.elevenlabs_webhook_secret) == (None, None)
+    assert (settings.assemblyai_api_key, settings.assemblyai_webhook_secret) == (None, None)
 
     _, client = local_client(says("Hello."), settings=settings)
     started = client.post("/api/v1/local/conversations")
     assert started.status_code == 200, started.text
     assert started.json()["conversation_id"].startswith("local_")
 
-    # And the ElevenLabs endpoints correctly report themselves as unconfigured rather than half-working.
-    assert client.post("/api/v1/voice/tools/verify_caller", json={}).json()["error"]["code"] == (
+    # Hosted ingestion remains mounted but explicitly disabled without provider configuration.
+    assert client.post("/api/v1/voice/assemblyai/post-call", content=b"{}").json()["error"]["code"] == (
         "CHANNEL_NOT_CONFIGURED"
     )
 

@@ -34,15 +34,13 @@ def test_backend_environment_selects_hosted_mode_and_hides_tunnel_credentials():
     assert "CLOUDFLARE_TUNNEL_TOKEN" not in env
 
 
-def test_provider_setup_dispatches_to_assemblyai_by_default_and_keeps_rollback(monkeypatch):
+def test_provider_setup_dispatches_only_to_assemblyai(monkeypatch):
     hosted = _module()
     calls = []
     monkeypatch.setattr(hosted, "setup_assemblyai", lambda config: calls.append("assemblyai") or {"browser": "b", "phone": "p"})
-    monkeypatch.setattr(hosted, "setup_elevenlabs", lambda config: calls.append("elevenlabs") or {"browser": "e", "phone": "e"})
 
     assert hosted.setup_provider({"VOICE_PROVIDER": "assemblyai"}) == {"browser": "b", "phone": "p"}
-    assert hosted.setup_provider({"VOICE_PROVIDER": "elevenlabs"}) == {"browser": "e", "phone": "e"}
-    assert calls == ["assemblyai", "elevenlabs"]
+    assert calls == ["assemblyai"]
 
 
 def test_assemblyai_preflight_generates_independent_secrets_and_loads_agent_ids(tmp_path, monkeypatch):
@@ -85,9 +83,8 @@ def test_assemblyai_preflight_generates_independent_secrets_and_loads_agent_ids(
         for name in (
             "PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET",
             "PREAUTH_ASSEMBLYAI_MEDIA_SECRET",
-            "PREAUTH_VOICE_AGENT_TOKEN",
+            "PREAUTH_VOICE_TOOL_TOKEN",
             "PREAUTH_GATEWAY_SECRET",
         )
     )
     assert len(set(generated.values())) == 4
-

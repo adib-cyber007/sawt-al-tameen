@@ -5,7 +5,6 @@ __pycache__/
 *.db
 *.db-journal
 .env
-.elevenlabs-state.json
 .assemblyai-state.json
 # Locally downloaded speech models (hundreds of MB; fetched with the commands in the README).
 models/

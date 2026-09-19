@@ -3,7 +3,7 @@
 Run this against your public URL before pointing the hosted voice provider at it. It walks a synthetic
 pre-authorisation call from verification to the sign-off boundary, and verifies the guardrails along the way.
 
-    export PREAUTH_VOICE_AGENT_TOKEN=...            # required
+    export PREAUTH_VOICE_TOOL_TOKEN=...             # required diagnostic token
     export PREAUTH_GATEWAY_SECRET=...               # if the deployment sets one
     export PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET=...    # to test the AssemblyAI webhook boundary
     uv run python scripts/verify_deployment.py --base-url https://your-backend.example
@@ -24,7 +24,6 @@ from datetime import date, timedelta
 from typing import Any
 
 from preauth.infrastructure.assemblyai_signature import sign as sign_assemblyai
-from preauth.infrastructure.elevenlabs_signature import sign as sign_elevenlabs
 
 CONVERSATION_ID = f"verify_{uuid.uuid4().hex[:12]}"
 PROVIDER = "PRV-30011"                          # Al Hudaiba Crescent Hospital, active, Orthopaedics
@@ -90,13 +89,12 @@ def main() -> int:
     parser.add_argument("--base-url", default=os.environ.get("PREAUTH_PUBLIC_BASE_URL", "http://localhost:8000"))
     args = parser.parse_args()
 
-    token = os.environ.get("PREAUTH_VOICE_AGENT_TOKEN", "").strip()
+    token = os.environ.get("PREAUTH_VOICE_TOOL_TOKEN", "").strip()
     if not token:
-        print("PREAUTH_VOICE_AGENT_TOKEN is not set", file=sys.stderr)
+        print("PREAUTH_VOICE_TOOL_TOKEN is not set", file=sys.stderr)
         return 2
     gateway_secret = os.environ.get("PREAUTH_GATEWAY_SECRET", "").strip() or None
-    provider = (os.environ.get("VOICE_PROVIDER") or "assemblyai").strip().lower()
-    elevenlabs_webhook_secret = os.environ.get("PREAUTH_ELEVENLABS_WEBHOOK_SECRET", "").strip() or None
+    provider = "assemblyai"
     assemblyai_webhook_secret = os.environ.get("PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET", "").strip() or None
     client = Client(args.base_url, token, gateway_secret)
     treatment_date = (date.today() + timedelta(days=21)).isoformat()
@@ -274,41 +272,7 @@ def main() -> int:
           str((body.get("error") or {}).get("code")))
 
     print("\nPost-call webhook")
-    if provider == "elevenlabs" and elevenlabs_webhook_secret:
-        payload = {
-            "type": "post_call_transcription",
-            "event_timestamp": int(time.time()),
-            "data": {
-                "agent_id": "verification", "conversation_id": CONVERSATION_ID, "status": "done",
-                "transcript": [{"role": "agent", "message": "Deployment verification call."}],
-                "metadata": {"call_duration_secs": 42},
-                "analysis": {"transcript_summary": "Deployment verification.", "call_successful": "success"},
-            },
-        }
-        raw = json.dumps(payload).encode()
-        status, _ = client.request(
-            "POST", "/api/v1/voice/elevenlabs/post-call", raw=raw,
-            headers={"elevenlabs-signature": sign_elevenlabs(raw, "wrong-secret", int(time.time()))},
-        )
-        check("webhook rejects a bad signature", status == 401, f"got HTTP {status}")
-        status, body = client.request(
-            "POST", "/api/v1/voice/elevenlabs/post-call", raw=raw,
-            headers={
-                "elevenlabs-signature": sign_elevenlabs(raw, elevenlabs_webhook_secret, int(time.time()))
-            },
-        )
-        check("webhook stores the transcript", status == 200 and body.get("accepted") is True, str(body)[:60])
-        check("transcript is linked to the case", case_id in (body.get("linked_case_ids") or []))
-
-        status, body = client.staff("POST", f"/api/v1/review/cases/{case_id}/decision", decision, actor=REVIEWER)
-        check("sign-off succeeds once logged",
-              status == 201 and body.get("to_status") == "APPROVED", f"HTTP {status}")
-        status, _ = client.staff(
-            "POST", f"/api/v1/cases/{case_id}/closure", {"reason": "DECISION_COMMUNICATED"},
-            actor={"X-Actor-Type": "SYSTEM", "X-Actor-Id": "verify-script"},
-        )
-        check("case closed", status == 200, f"got HTTP {status}")
-    elif provider == "assemblyai" and assemblyai_webhook_secret:
+    if assemblyai_webhook_secret:
         # A deployment check has no real provider session/timeline to retrieve. Prove the signed trust boundary;
         # actual ingestion is exercised by the offline fake-provider suite and the live acceptance call.
         payload = {"type": "session.completed", "session_id": "verify_no_live_session"}
@@ -344,12 +308,7 @@ def main() -> int:
         )
         check("verification case cleaned up without bypassing sign-off", status == 200, f"got HTTP {status}")
     else:
-        expected = (
-            "PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET"
-            if provider == "assemblyai"
-            else "PREAUTH_ELEVENLABS_WEBHOOK_SECRET"
-        )
-        print(f"  SKIP  post-call webhook ({expected} not set)")
+        print("  SKIP  post-call webhook (PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET not set)")
         print("        Reviewers stay blocked on voice cases until the webhook is configured.")
         status, _ = client.staff(
             "POST",

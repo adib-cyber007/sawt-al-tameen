@@ -1,6 +1,6 @@
 #!/bin/sh
 # Hosted voice mode, one command: backend -> tunnel -> verification -> AssemblyAI agents/webhooks -> phone/browser
-# -> summary. ElevenLabs remains selectable only as rollback. Reads .env; Ctrl+C stops everything it started.
+# -> summary. Reads .env; Ctrl+C stops everything it started.
 # Every step is in scripts/hosted.py; see the one-time setup in .env.example.
 set -eu
 cd "$(dirname "$0")/.."

@@ -2,7 +2,7 @@
 
 These routes exist only when the process runs with ``PREAUTH_RUNTIME_MODE=local``; otherwise the router is not
 mounted at all. They carry no insurance logic — the runtime they delegate to reaches the same application
-services through the same agent toolbox as the ElevenLabs channel.
+services through the same agent toolbox as the AssemblyAI channel.
 """
 
 import hmac

@@ -13,30 +13,6 @@ def test_generated_api_docs_are_current():
     assert result.returncode == 0, result.stderr
 
 
-def test_elevenlabs_setup_dry_run_builds_payloads():
-    import json
-
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "elevenlabs_setup.py"), "--dry-run"], capture_output=True, text=True
-    )
-    assert result.returncode == 0, result.stderr
-    payload = json.loads(result.stdout)
-    assert len(payload["tools"]) == 3
-    agent = payload["agent"]["conversation_config"]
-    assert agent["agent"]["language"] == "en"
-    assert agent["language_presets"] == {}
-    assert "language_detection" not in agent["agent"]["prompt"]["built_in_tools"]
-    assert agent["asr"]["keywords"]
-    prompt = agent["agent"]["prompt"]["prompt"]
-    assert "never issue a final approval or denial" in prompt.lower()
-    assert "you identify yourself as an ai assistant" in prompt.lower()
-    assert "verify_caller" in prompt and "check_coverage_rule" in prompt and "log_transcript" in prompt
-    # The knowledge base is the catalogue the rules decide from, and nothing else.
-    documents = {d["name"] for d in agent["agent"]["prompt"]["knowledge_base"]}
-    assert "schedule-basic" in documents and "escalation_rules" in documents
-    assert not any(d.startswith("plan-") for d in documents)
-
-
 def test_assemblyai_setup_dry_run_builds_two_secret_free_payloads():
     import json
 

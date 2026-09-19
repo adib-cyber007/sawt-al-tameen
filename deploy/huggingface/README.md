@@ -28,7 +28,7 @@ Set these as Space secrets (Settings → Variables and secrets):
 | `PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET` | Verifies completed-session deliveries from AssemblyAI. |
 | `PREAUTH_ASSEMBLYAI_MEDIA_SECRET` | Signs short-lived Twilio media-stream URLs. |
 | `PREAUTH_PUBLIC_BASE_URL` | Stable public HTTPS URL of this Space. |
-| `PREAUTH_VOICE_AGENT_TOKEN` | Deployment-verifier token; also retained for the rollback HTTP-tool route. |
+| `PREAUTH_VOICE_TOOL_TOKEN` | Token for the provider-neutral deployment diagnostic endpoint. |
 | `PREAUTH_GATEWAY_SECRET` | Required on staff and reviewer APIs |
 | `PREAUTH_SEED_SCENARIOS` | Optional: set to `1` to create the five demo cases on first start |
 
