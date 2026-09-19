@@ -2,16 +2,49 @@
 
 import pytest
 
-from preauth.infrastructure.settings import RuntimeMode, Settings
+from preauth.infrastructure.settings import RuntimeMode, Settings, VoiceProvider
 from preauth.local.config import LlmProvider, LocalSettings, SttProvider, TtsProvider
 
 
 def test_defaults_to_the_elevenlabs_channel(monkeypatch):
-    for name in ("PREAUTH_RUNTIME_MODE", "PREAUTH_GATEWAY_SECRET", "PREAUTH_VOICE_AGENT_TOKEN"):
+    for name in ("PREAUTH_RUNTIME_MODE", "PREAUTH_GATEWAY_SECRET", "PREAUTH_VOICE_AGENT_TOKEN", "VOICE_PROVIDER"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings.from_env()
     assert settings.runtime_mode is RuntimeMode.ELEVENLABS
+    assert settings.voice_provider is VoiceProvider.ELEVENLABS
     assert settings.local_mode is False
+
+
+def test_assemblyai_hosted_provider_is_selected_independently(monkeypatch):
+    monkeypatch.delenv("PREAUTH_RUNTIME_MODE", raising=False)
+    monkeypatch.setenv("VOICE_PROVIDER", "AssemblyAI")
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "test-aai-key")
+    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID", "browser-agent")
+    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID", "phone-agent")
+    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_VOICE_ID", "alba")
+    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_LLM_MODEL", "gemini-test")
+    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_API_BASE", "https://agents.example.test/")
+    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_WS_URL", "wss://agents.example.test/ws")
+
+    settings = Settings.from_env()
+
+    assert settings.voice_provider is VoiceProvider.ASSEMBLYAI
+    assert settings.assemblyai_enabled
+    assert settings.assemblyai_api_key == "test-aai-key"
+    assert settings.assemblyai_webhook_secret == "test-webhook-secret"
+    assert settings.assemblyai_browser_agent_id == "browser-agent"
+    assert settings.assemblyai_phone_agent_id == "phone-agent"
+    assert settings.assemblyai_voice_id == "alba"
+    assert settings.assemblyai_llm_model == "gemini-test"
+    assert settings.assemblyai_api_base == "https://agents.example.test"
+    assert settings.assemblyai_ws_url == "wss://agents.example.test/ws"
+
+
+def test_an_unknown_voice_provider_is_rejected(monkeypatch):
+    monkeypatch.setenv("VOICE_PROVIDER", "azure")
+    with pytest.raises(ValueError, match="elevenlabs, assemblyai"):
+        Settings.from_env()
 
 
 def test_local_mode_is_selected_by_one_variable(monkeypatch):
@@ -32,6 +65,8 @@ def test_local_mode_requires_no_elevenlabs_credentials(monkeypatch):
         "PREAUTH_PUBLIC_BASE_URL",
         "PREAUTH_ELEVENLABS_WEBHOOK_SECRET",
         "PREAUTH_VOICE_AGENT_TOKEN",
+        "ASSEMBLYAI_API_KEY",
+        "PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PREAUTH_RUNTIME_MODE", "local")
@@ -39,6 +74,8 @@ def test_local_mode_requires_no_elevenlabs_credentials(monkeypatch):
     settings = Settings.from_env()
     assert settings.local_mode
     assert settings.elevenlabs_webhook_secret is None
+    assert settings.assemblyai_api_key is None
+    assert settings.assemblyai_webhook_secret is None
     assert settings.voice_agent_token is None
     assert settings.database_url.startswith("sqlite:///")
     # And nothing in local mode's own configuration names a hosted provider.
