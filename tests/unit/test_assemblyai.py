@@ -1,0 +1,118 @@
+"""AssemblyAI tool schemas, stored-agent payloads and REST boundary."""
+
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+import pytest
+
+from preauth.agent_tools.assemblyai import all_function_tool_configs
+from preauth.agent_tools.toolbox import TOOLS
+from preauth.infrastructure.assemblyai_client import AssemblyAIClient, AssemblyAIError
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_every_tool_converts_to_an_assemblyai_function_schema():
+    configs = all_function_tool_configs()
+    assert [config["name"] for config in configs] == [tool.name for tool in TOOLS]
+    assert len(configs) == 3
+    for config in configs:
+        assert config["type"] == "function"
+        assert config["description"]
+        assert config["execution_mode"] == "interactive"
+        assert 1 <= config["timeout_seconds"] <= 300
+        schema = config["parameters"]
+        encoded = json.dumps(schema)
+        assert schema["type"] == "object"
+        assert "$ref" not in encoded and "$defs" not in encoded and "anyOf" not in encoded
+        assert set(schema["required"]) <= set(schema["properties"])
+        for prop in schema["properties"].values():
+            assert prop["description"]
+
+
+def test_agent_payloads_use_channel_native_audio_and_one_tool_source():
+    import importlib.util
+
+    path = ROOT / "scripts" / "assemblyai_setup.py"
+    spec = importlib.util.spec_from_file_location("assemblyai_setup", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    agents = module.desired_agents(voice_id="alba", llm_model="gemini-test", api_key_for_gateway="test-key")
+    assert set(agents) == {"browser", "phone"}
+    assert agents["browser"]["input"]["format"] == {"encoding": "audio/pcm", "sample_rate": 24000}
+    assert agents["phone"]["input"]["format"] == {"encoding": "audio/pcmu", "sample_rate": 8000}
+    for payload in agents.values():
+        assert payload["input"]["format"] == payload["output"]["format"]
+        assert [tool["name"] for tool in payload["tools"]] == [tool.name for tool in TOOLS]
+        assert payload["llm"] == [{
+            "base_url": "https://llm-gateway.assemblyai.com/v1",
+            "model": "gemini-test",
+            "api_key": "test-key",
+        }]
+        assert payload["input"]["keyterms"]
+        assert "never issue a final approval or denial" in payload["system_prompt"].lower()
+
+
+@pytest.fixture
+def upstream():
+    seen: list[dict] = []
+    reply = {"status": 200, "body": {"id": "agent_1"}}
+
+    class Handler(BaseHTTPRequestHandler):
+        def _handle(self):
+            length = int(self.headers.get("content-length", "0"))
+            raw = self.rfile.read(length) if length else b""
+            seen.append({
+                "method": self.command,
+                "path": self.path,
+                "authorization": self.headers.get("Authorization"),
+                "body": json.loads(raw) if raw else None,
+            })
+            body = json.dumps(reply["body"]).encode()
+            self.send_response(reply["status"])
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = _handle
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}", seen, reply
+    server.shutdown()
+
+
+def test_rest_client_uses_bearer_auth_and_json(upstream):
+    base, seen, _ = upstream
+    result = AssemblyAIClient("test-key", api_base=base).request(
+        "POST", "/v1/agents", {"name": "agent"}, query={"region": "us"}
+    )
+    assert result == {"id": "agent_1"}
+    assert seen == [{
+        "method": "POST",
+        "path": "/v1/agents?region=us",
+        "authorization": "Bearer test-key",
+        "body": {"name": "agent"},
+    }]
+
+
+def test_rest_client_errors_do_not_leak_the_key(upstream):
+    base, _, reply = upstream
+    reply.update(status=401, body={"error": "invalid key"})
+    with pytest.raises(AssemblyAIError) as raised:
+        AssemblyAIClient("very-secret-key", api_base=base).request("GET", "/v1/agents")
+    assert raised.value.status == 401
+    assert "very-secret-key" not in str(raised.value)
+
+
+def test_unreachable_rest_api_fails_boundedly():
+    with pytest.raises(AssemblyAIError, match="could not be reached"):
+        AssemblyAIClient("key", api_base="http://127.0.0.1:1", timeout_secs=1).request("GET", "/v1/agents")

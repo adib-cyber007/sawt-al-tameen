@@ -34,6 +34,23 @@ def test_elevenlabs_setup_dry_run_builds_payloads():
     assert not any(d.startswith("plan-") for d in documents)
 
 
+def test_assemblyai_setup_dry_run_builds_two_secret_free_payloads():
+    import json
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "assemblyai_setup.py"), "--dry-run"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert set(payload["agents"]) == {"browser", "phone"}
+    assert payload["agents"]["browser"]["input"]["format"]["encoding"] == "audio/pcm"
+    assert payload["agents"]["phone"]["input"]["format"]["encoding"] == "audio/pcmu"
+    assert "<ASSEMBLYAI_API_KEY>" in result.stdout
+    assert "session.completed" in result.stdout
+
+
 def test_database_url_normalisation():
     from preauth.infrastructure.settings import normalise_database_url
 
