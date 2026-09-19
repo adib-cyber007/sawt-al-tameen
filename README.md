@@ -187,8 +187,8 @@ docker compose up -d --wait                               # PostgreSQL
 PREAUTH_TEST_DATABASE_URL=postgres://preauth:preauth@localhost:55432/preauth uv run pytest
 ```
 
-**307 tests**, passing on both databases. They build the schema through the real Alembic migration, so the
-migration itself is tested. Among other things, they pin down that:
+**349 tests** pass in the current SQLite run; CI runs the same suite against SQLite and PostgreSQL. They build the
+schema through the real Alembic migration, so the migration itself is tested. Among other things, they pin down that:
 - all three lapsed members are rejected;
 - all eleven ambiguous procedures escalate, citing their own rule;
 - missing information is never reported as a failure;

@@ -770,3 +770,7 @@ SQLAlchemy/SQLite Python 3.12 deprecation and local Windows pytest-cache warning
 Verification after the documentation/tooling audit: catalogue regeneration check passed, AssemblyAI dry-run
 produced PCM16/24 kHz and PCMU/8 kHz agents with exactly the three allowed tools, the deterministic harness passed
 **5 scenarios / 30 checks**, and the complete suite passed **349 tests** on 2026-09-19.
+
+CI now validates the AssemblyAI provisioning dry-run as a generated contract and invokes the conversation harness
+directly against a fresh database, proving the harness owns its migration prerequisite. The ElevenLabs dry-run is
+retained in CI only while that implementation remains the pre-acceptance rollback path.

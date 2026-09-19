@@ -46,6 +46,8 @@ jobs:
       - run: uv sync --frozen
       - run: uv run python scripts/export_api_docs.py --check
       - run: uv run python scripts/generate_uae_knowledge_base.py --check
+      - run: uv run python scripts/assemblyai_setup.py --dry-run > /dev/null
+      # Retained only while the migration rollback path exists.
       - run: uv run python scripts/elevenlabs_setup.py --dry-run > /dev/null
 
   simulations:
@@ -60,9 +62,7 @@ jobs:
       - name: Run the five call scenarios against a fresh database
         env:
           PREAUTH_DATABASE_URL: sqlite:///./simulation.db
-        run: |
-          uv run alembic upgrade head
-          uv run python scripts/simulate_conversations.py --quiet
+        run: uv run python scripts/simulate_conversations.py --quiet
 
   local-mode:
     name: local mode starts without any paid credential
@@ -74,7 +74,7 @@ jobs:
           enable-cache: true
       # `local` only: no model is downloaded, and the voice extras are not needed to prove the wiring.
       - run: uv sync --frozen --extra local
-      # Deliberately unset throughout: ELEVENLABS_API_KEY, PREAUTH_PUBLIC_BASE_URL, the webhook secret.
+      # Deliberately unset throughout: all AssemblyAI/ElevenLabs keys, public URL and webhook/media secrets.
       - name: Migrate, seed and diagnose
         run: |
           uv run alembic upgrade head
