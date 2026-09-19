@@ -20,6 +20,7 @@ def test_assemblyai_hosted_provider_is_selected_independently(monkeypatch):
     monkeypatch.setenv("VOICE_PROVIDER", "AssemblyAI")
     monkeypatch.setenv("ASSEMBLYAI_API_KEY", "test-aai-key")
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_MEDIA_SECRET", "test-media-secret")
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID", "browser-agent")
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID", "phone-agent")
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_VOICE_ID", "alba")
@@ -33,6 +34,7 @@ def test_assemblyai_hosted_provider_is_selected_independently(monkeypatch):
     assert settings.assemblyai_enabled
     assert settings.assemblyai_api_key == "test-aai-key"
     assert settings.assemblyai_webhook_secret == "test-webhook-secret"
+    assert settings.assemblyai_media_secret == "test-media-secret"
     assert settings.assemblyai_browser_agent_id == "browser-agent"
     assert settings.assemblyai_phone_agent_id == "phone-agent"
     assert settings.assemblyai_voice_id == "alba"
@@ -67,6 +69,7 @@ def test_local_mode_requires_no_elevenlabs_credentials(monkeypatch):
         "PREAUTH_VOICE_AGENT_TOKEN",
         "ASSEMBLYAI_API_KEY",
         "PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET",
+        "PREAUTH_ASSEMBLYAI_MEDIA_SECRET",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PREAUTH_RUNTIME_MODE", "local")
@@ -76,6 +79,7 @@ def test_local_mode_requires_no_elevenlabs_credentials(monkeypatch):
     assert settings.elevenlabs_webhook_secret is None
     assert settings.assemblyai_api_key is None
     assert settings.assemblyai_webhook_secret is None
+    assert settings.assemblyai_media_secret is None
     assert settings.voice_agent_token is None
     assert settings.database_url.startswith("sqlite:///")
     # And nothing in local mode's own configuration names a hosted provider.

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sawt Assurance — pre-authorisation line</title>
+  <link rel="stylesheet" href="/voice/assets/styles.css">
+</head>
+<body>
+  <main>
+    <section class="card">
+      <div class="heading">
+        <div>
+          <p class="eyebrow">Sawt Assurance</p>
+          <h1>Pre-authorisation voice assistant</h1>
+        </div>
+        <span id="connection" class="badge">Not connected</span>
+      </div>
+      <p class="intro">
+        Speak naturally to prepare a pre-authorisation request. The assistant can create and assess a case,
+        but only an authorised human reviewer can approve or deny it.
+      </p>
+      <div id="transcript" class="transcript" aria-live="polite" aria-label="Call transcript">
+        <p class="empty">Your English-language transcript will appear here.</p>
+      </div>
+      <div class="actions">
+        <button id="start" type="button">Start call</button>
+        <button id="end" type="button" class="secondary" disabled>End call</button>
+        <span id="status" role="status">Microphone access is requested only after you start.</span>
+      </div>
+    </section>
+  </main>
+  <script src="/voice/assets/app.js"></script>
+</body>
+</html>

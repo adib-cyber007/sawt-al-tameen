@@ -77,13 +77,16 @@ def main() -> int:
         DOCS / "API.md": render_markdown(spec) + "\n",
     }
     if "--check" in sys.argv:
-        stale = [p.name for p, content in rendered.items() if not p.exists() or p.read_text() != content]
+        stale = [
+            p.name for p, content in rendered.items()
+            if not p.exists() or p.read_text(encoding="utf-8") != content
+        ]
         if stale:
             print(f"Stale API docs: {stale}. Run scripts/export_api_docs.py", file=sys.stderr)
             return 1
         return 0
     for path, content in rendered.items():
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
         print(f"wrote {path.relative_to(DOCS.parent)}")
     return 0
 

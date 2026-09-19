@@ -1,30 +1,33 @@
-"""Inbound calls on our own Twilio number, handed to the ElevenLabs agent through register-call.
+"""Inbound calls on our own Twilio number, handed to the selected hosted voice provider.
 
-Twilio posts the incoming call here; we verify Twilio's signature, register the call with the agent, and hand
-Twilio back the TwiML ElevenLabs returns. From then on the call is an ordinary ElevenLabs conversation: the same
-three tools, the same post-call webhook, the same rules and review queue. Nothing here touches a case.
+Twilio posts the incoming call here and we verify Twilio's signature. ElevenLabs calls retain their existing
+register-call flow. AssemblyAI calls receive local TwiML containing a signed, short-lived media WebSocket URL;
+the API bridge then proxies PCMU audio to the configured stored agent. Nothing here touches a case.
 
 Security: the endpoint refuses to run unless it can check signatures, and it checks them against the public URL
 Twilio was configured with. Logs carry the CallSid and the last four digits of each number, never tokens.
 """
 
 import logging
+from html import escape
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from preauth.domain.errors import DomainError
 from preauth.infrastructure import twilio_signature
+from preauth.infrastructure import assemblyai_media_token
 from preauth.infrastructure.elevenlabs_register_call import (
     ElevenLabsRegisterCallClient,
     RegisterCallClient,
     RegisterCallError,
 )
-from preauth.infrastructure.settings import Settings
+from preauth.infrastructure.settings import Settings, VoiceProvider
 
 logger = logging.getLogger("preauth.voice.twilio")
 
 INBOUND_PATH = "/api/v1/voice/twilio/inbound"
+ASSEMBLYAI_TWILIO_PATH = "/api/v1/voice/assemblyai/twilio"
 
 # Said to the caller when the agent cannot be reached. Twilio's own error would be a generic "application error".
 FALLBACK_TWIML = (
@@ -62,33 +65,61 @@ class TwilioInboundService:
         public_base_url: str | None,
         agent_id: str | None,
         client: RegisterCallClient | None,
+        provider: VoiceProvider = VoiceProvider.ELEVENLABS,
+        media_secret: str | None = None,
+        assemblyai_api_key: str | None = None,
     ):
         self._auth_token = auth_token
-        self._url = f"{public_base_url.rstrip('/')}{INBOUND_PATH}" if public_base_url else None
+        self._public_base_url = public_base_url.rstrip("/") if public_base_url else None
+        self._url = f"{self._public_base_url}{INBOUND_PATH}" if self._public_base_url else None
         self._agent_id = agent_id
         self._client = client
+        self._provider = provider
+        self._media_secret = media_secret
+        self._assemblyai_api_key = assemblyai_api_key
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "TwilioInboundService":
-        client = ElevenLabsRegisterCallClient(settings.elevenlabs_api_key) if settings.elevenlabs_api_key else None
+        client = None
+        if settings.voice_provider is VoiceProvider.ELEVENLABS and settings.elevenlabs_api_key:
+            client = ElevenLabsRegisterCallClient(settings.elevenlabs_api_key)
         return cls(
             auth_token=settings.twilio_auth_token,
             public_base_url=settings.public_base_url,
-            agent_id=settings.elevenlabs_agent_id,
+            agent_id=(
+                settings.assemblyai_phone_agent_id
+                if settings.voice_provider is VoiceProvider.ASSEMBLYAI
+                else settings.elevenlabs_agent_id
+            ),
             client=client,
+            provider=settings.voice_provider,
+            media_secret=settings.assemblyai_media_secret,
+            assemblyai_api_key=settings.assemblyai_api_key,
         )
 
     def missing_configuration(self) -> list[str]:
-        return [
-            name
-            for name, value in (
-                ("TWILIO_AUTH_TOKEN", self._auth_token),
-                ("PREAUTH_PUBLIC_BASE_URL", self._url),
-                ("ELEVENLABS_API_KEY", self._client),
-                ("PREAUTH_ELEVENLABS_AGENT_ID", self._agent_id),
-            )
-            if not value
-        ]
+        common = [("TWILIO_AUTH_TOKEN", self._auth_token), ("PREAUTH_PUBLIC_BASE_URL", self._url)]
+        provider = (
+            [
+                ("ASSEMBLYAI_API_KEY", self._assemblyai_api_key),
+                ("PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID", self._agent_id),
+                ("PREAUTH_ASSEMBLYAI_MEDIA_SECRET", self._media_secret),
+            ]
+            if self._provider is VoiceProvider.ASSEMBLYAI
+            else [("ELEVENLABS_API_KEY", self._client), ("PREAUTH_ELEVENLABS_AGENT_ID", self._agent_id)]
+        )
+        return [name for name, value in common + provider if not value]
+
+    def _assemblyai_twiml(self, call_sid: str) -> str:
+        token = assemblyai_media_token.issue(call_sid, self._media_secret)
+        public = urlsplit(self._public_base_url)
+        scheme = "wss" if public.scheme == "https" else "ws"
+        path = f"{public.path.rstrip('/')}{ASSEMBLYAI_TWILIO_PATH}"
+        stream_url = urlunsplit((scheme, public.netloc, path, urlencode({"token": token}), ""))
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?><Response><Connect>'
+            f'<Stream url="{escape(stream_url, quote=True)}"/></Connect></Response>'
+        )
 
     def handle(self, raw_body: bytes, signature: str | None, query_string: str = "") -> InboundCallResult:
         missing = self.missing_configuration()
@@ -114,6 +145,14 @@ class TwilioInboundService:
                 "Inbound call is missing From or To",
                 details={"missing": [n for n, v in (("From", from_number), ("To", to_number)) if not v]},
             )
+
+        if self._provider is VoiceProvider.ASSEMBLYAI:
+            if not call_sid:
+                raise InboundCallInvalidError(
+                    "Inbound call is missing CallSid", details={"missing": ["CallSid"]}
+                )
+            logger.info("assemblyai_media_stream_issued", extra={"call_sid": call_sid})
+            return InboundCallResult(twiml=self._assemblyai_twiml(call_sid), registered=True)
 
         try:
             twiml = self._client.register_call(

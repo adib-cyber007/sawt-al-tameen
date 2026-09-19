@@ -6,10 +6,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from preauth.agent_tools.toolbox import AgentToolbox
-from preauth.agent_tools.voice_gateway import VoiceToolGateway
+from preauth.agent_tools.voice_gateway import ASSEMBLYAI_AGENT_ACTOR, VoiceToolGateway
 from preauth.api.errors import install_error_handlers
 from preauth.api.middleware import RequestContextMiddleware
-from preauth.api.routes import agent, cases, review, twilio, voice
+from preauth.api.routes import agent, assemblyai, cases, review, twilio, voice
 from preauth.application.services import ApplicationServices
 from preauth.application.twilio_inbound_service import TwilioInboundService
 from preauth.infrastructure.observability import install_log_context
@@ -50,14 +50,26 @@ def create_app(
     app.state.settings = settings or Settings()
     app.state.toolbox = AgentToolbox(services)
     app.state.voice_gateway = VoiceToolGateway(services, app.state.toolbox)
+    app.state.assemblyai_voice_gateway = VoiceToolGateway(
+        services, app.state.toolbox, ASSEMBLYAI_AGENT_ACTOR
+    )
     app.add_middleware(RequestContextMiddleware)
     install_error_handlers(app)
     app.include_router(cases.router)
     app.include_router(review.router)
     app.include_router(agent.router)
     app.include_router(voice.router)
+    app.include_router(assemblyai.router)
     app.state.twilio_inbound = TwilioInboundService.from_settings(app.state.settings)
     app.include_router(twilio.router)
+    if app.state.settings.assemblyai_enabled:
+        hosted_web = Path(__file__).resolve().parent.parent / "hosted_web"
+        app.mount("/voice/assets", StaticFiles(directory=hosted_web), name="hosted-voice-assets")
+
+        @app.get("/voice", tags=["Voice channel (AssemblyAI)"], summary="Hosted voice console", include_in_schema=False)
+        def hosted_voice_console() -> FileResponse:
+            return FileResponse(hosted_web / "index.html")
+
     if local_runtime is not None:
         from preauth.api.routes import local as local_routes
 

@@ -5572,7 +5572,7 @@
     },
     "/api/v1/voice/twilio/inbound": {
       "post": {
-        "description": "Set as the Voice webhook of your Twilio number (A call comes in \u2192 Webhook \u2192 HTTP POST). Accepts Twilio's form-encoded call parameters, registers the call with the ElevenLabs agent (`POST /v1/convai/twilio/register-call`), and returns the TwiML ElevenLabs produces, as `application/xml`. If ElevenLabs cannot be reached, returns TwiML that apologises and hangs up rather than an error, so the caller is never left with Twilio's generic application error.\n\n**Authorisation:** Header `X-Twilio-Signature`, validated with `TWILIO_AUTH_TOKEN` against `PREAUTH_PUBLIC_BASE_URL` + this path. Disabled (503) until `TWILIO_AUTH_TOKEN`, `PREAUTH_PUBLIC_BASE_URL`, `ELEVENLABS_API_KEY` and `PREAUTH_ELEVENLABS_AGENT_ID` are all set.\n\n**State transitions:** None. The call becomes an ElevenLabs conversation using the same tools and post-call webhook.",
+        "description": "Set as the Voice webhook of your Twilio number (A call comes in \u2192 Webhook \u2192 HTTP POST). Accepts Twilio's form-encoded call parameters and returns `application/xml` TwiML for the selected hosted voice provider. ElevenLabs uses its register-call API; AssemblyAI receives a signed, short-lived WebSocket media URL.\n\n**Authorisation:** Header `X-Twilio-Signature`, validated with `TWILIO_AUTH_TOKEN` against `PREAUTH_PUBLIC_BASE_URL` + this path. Provider-specific credentials and agent IDs must also be configured.\n\n**State transitions:** None. The call uses the same business tools and transcript safety boundary for either provider.",
         "operationId": "twilio_inbound_api_v1_voice_twilio_inbound_post",
         "parameters": [
           {

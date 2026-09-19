@@ -1048,7 +1048,10 @@ def main() -> int:
         return 1
 
     if "--check" in sys.argv:
-        stale = [n for n, c in files.items() if not (OUT / n).exists() or (OUT / n).read_text() != serialise(n, c)]
+        stale = [
+            n for n, c in files.items()
+            if not (OUT / n).exists() or (OUT / n).read_text(encoding="utf-8") != serialise(n, c)
+        ]
         if stale:
             print(f"Stale knowledge base files: {stale}. Run scripts/generate_uae_knowledge_base.py", file=sys.stderr)
             return 1
@@ -1057,7 +1060,7 @@ def main() -> int:
 
     OUT.mkdir(parents=True, exist_ok=True)
     for name, content in files.items():
-        (OUT / name).write_text(serialise(name, content))
+        (OUT / name).write_text(serialise(name, content), encoding="utf-8")
         print(f"wrote knowledge_base/{name}")
     print(f"\nValidated: {len(PROCEDURES)} procedures, {len(PROVIDERS)} providers, {len(MEMBERS)} members, "
           f"{len(TIERS)} tiers — no consistency errors.")

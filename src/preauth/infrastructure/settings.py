@@ -53,6 +53,9 @@ class Settings:
     elevenlabs_agent_id: str | None = None
     assemblyai_api_key: str | None = field(default=None, repr=False)
     assemblyai_webhook_secret: str | None = field(default=None, repr=False)
+    # Signs the short-lived URL embedded in Twilio's <Stream>. This is deliberately separate from the
+    # provider webhook secret so rotating one trust boundary does not invalidate the other.
+    assemblyai_media_secret: str | None = field(default=None, repr=False)
     assemblyai_browser_agent_id: str | None = None
     assemblyai_phone_agent_id: str | None = None
     assemblyai_voice_id: str | None = None
@@ -85,6 +88,7 @@ class Settings:
             elevenlabs_agent_id=_optional("PREAUTH_ELEVENLABS_AGENT_ID"),
             assemblyai_api_key=_optional("ASSEMBLYAI_API_KEY"),
             assemblyai_webhook_secret=_optional("PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET"),
+            assemblyai_media_secret=_optional("PREAUTH_ASSEMBLYAI_MEDIA_SECRET"),
             assemblyai_browser_agent_id=_optional("PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID"),
             assemblyai_phone_agent_id=_optional("PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID"),
             assemblyai_voice_id=_optional("PREAUTH_ASSEMBLYAI_VOICE_ID"),
