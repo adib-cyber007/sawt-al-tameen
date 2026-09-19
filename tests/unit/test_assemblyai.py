@@ -90,7 +90,7 @@ def upstream():
     server.shutdown()
 
 
-def test_rest_client_uses_bearer_auth_and_json(upstream):
+def test_rest_client_uses_voice_agent_rest_auth_and_json(upstream):
     base, seen, _ = upstream
     result = AssemblyAIClient("test-key", api_base=base).request(
         "POST", "/v1/agents", {"name": "agent"}, query={"region": "us"}
@@ -99,7 +99,7 @@ def test_rest_client_uses_bearer_auth_and_json(upstream):
     assert seen == [{
         "method": "POST",
         "path": "/v1/agents?region=us",
-        "authorization": "Bearer test-key",
+        "authorization": "test-key",
         "body": {"name": "agent"},
     }]
 

@@ -11,6 +11,7 @@ from preauth.api.errors import install_error_handlers
 from preauth.api.middleware import RequestContextMiddleware
 from preauth.api.routes import agent, assemblyai, cases, review, twilio, voice
 from preauth.application.services import ApplicationServices
+from preauth.application.assemblyai_post_call import AssemblyAIPostCallService
 from preauth.application.twilio_inbound_service import TwilioInboundService
 from preauth.infrastructure.observability import install_log_context
 from preauth.infrastructure.settings import Settings
@@ -53,6 +54,7 @@ def create_app(
     app.state.assemblyai_voice_gateway = VoiceToolGateway(
         services, app.state.toolbox, ASSEMBLYAI_AGENT_ACTOR
     )
+    app.state.assemblyai_post_call = AssemblyAIPostCallService(app.state.settings, services.voice)
     app.add_middleware(RequestContextMiddleware)
     install_error_handlers(app)
     app.include_router(cases.router)

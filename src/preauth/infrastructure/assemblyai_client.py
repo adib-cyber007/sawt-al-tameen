@@ -46,7 +46,8 @@ class AssemblyAIClient:
         url = self._api_base + path
         if query:
             url += "?" + urllib.parse.urlencode(query)
-        headers = {"Authorization": f"Bearer {self._api_key}", "Accept": "application/json"}
+        # Voice Agent REST resources use the raw key. Only the realtime WebSocket uses a Bearer value.
+        headers = {"Authorization": self._api_key, "Accept": "application/json"}
         data = None
         if body is not None:
             headers["Content-Type"] = "application/json"
@@ -74,6 +75,21 @@ class AssemblyAIClient:
         if not isinstance(payload, dict):
             raise AssemblyAIError("AssemblyAI returned an unexpected JSON response")
         return payload
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        safe_id = urllib.parse.quote(session_id, safe="")
+        return self.request("GET", f"/v1/sessions/{safe_id}")
+
+    def list_sessions(
+        self, *, status: str = "completed", agent_id: str | None = None, limit: int = 200,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        query: dict[str, str | int] = {"status": status, "limit": max(1, min(limit, 200))}
+        if agent_id:
+            query["agent_id"] = agent_id
+        if cursor:
+            query["cursor"] = cursor
+        return self.request("GET", "/v1/sessions", query=query)
 
     def download_json(self, url: str) -> dict[str, Any]:
         """Download one pre-signed JSON artifact. The signature in the URL is the authorization."""

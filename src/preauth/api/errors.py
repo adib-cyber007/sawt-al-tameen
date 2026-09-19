@@ -40,6 +40,9 @@ STATUS_BY_ERROR: list[tuple[type[DomainError], int]] = [
 # Registered by name to avoid importing route modules here.
 STATUS_BY_CODE: dict[str, int] = {
     "CHANNEL_NOT_CONFIGURED": 503,
+    "WEBHOOK_SIGNATURE_INVALID": 401,
+    "WEBHOOK_ARTIFACT_PENDING": 503,
+    "VOICE_PROVIDER_UNAVAILABLE": 503,
     "TWILIO_SIGNATURE_INVALID": 401,
     # Local mode: a missing model or a stopped service is an unavailable dependency, not a bad request.
     "LOCAL_DEPENDENCY_MISSING": 503,

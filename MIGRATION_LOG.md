@@ -662,3 +662,27 @@ The user approved this plan and explicitly directed the migration to continue on
 
 Verification: 41 focused tests passed on 2026-09-19. Live audio, latency, network-drop/resume and provider error
 behavior still require AssemblyAI credentials during Phase 5.
+
+### Session transcript ingestion (plan step 5)
+
+- Added the signed `POST /api/v1/voice/assemblyai/post-call` endpoint. It verifies `X-AAI-Signature` against the
+  unmodified request body with HMAC-SHA256, rejects timestamps outside a five-minute replay window, and accepts
+  both top-level and nested session identifiers used by AssemblyAI event envelopes.
+- The notification is never treated as the authoritative transcript. The service fetches the completed session,
+  downloads the pre-signed timeline artifact without attaching the API credential, and normalizes caller, agent
+  and function-tool turns into the existing immutable call-record format.
+- Missing timeline artifacts return `503 WEBHOOK_ARTIFACT_PENDING`, allowing AssemblyAI delivery retries. REST or
+  artifact failures return `503 VOICE_PROVIDER_UNAVAILABLE`; malformed or unauthenticated events remain terminal
+  400/401 responses.
+- Call records use the AssemblyAI `session_id` as the existing conversation correlation key. This is the same id
+  used by the realtime tool bridge, so every affected case remains blocked by `CALL_RECORD_PENDING` until the
+  matching transcript is durable. Duplicate events are idempotent and do not duplicate audit entries.
+- Stored analysis includes interruption, tool-call/error, user-confidence and first-audio aggregates. Short-lived
+  pre-signed artifact URLs are not persisted.
+- Added `scripts/assemblyai_reconcile.py` to page through completed sessions and invoke the same idempotent ingest
+  path after missed or exhausted webhook deliveries.
+- Corrected Voice Agent REST authentication to the documented raw API-key header. The realtime WebSocket keeps its
+  documented Bearer authentication; these provider surfaces intentionally differ.
+
+Verification: 38 focused unit, integration, architecture and legacy voice-channel tests passed on 2026-09-19.
+Live webhook timing and reconciliation still require real AssemblyAI credentials during Phase 5.

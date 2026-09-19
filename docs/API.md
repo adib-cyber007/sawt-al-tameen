@@ -399,6 +399,26 @@ Receives `post_call_transcription` events, stores the transcript and analysis as
 | 500 | `ErrorResponse` | INTERNAL_ERROR |
 | 503 | `ErrorResponse` | CHANNEL_NOT_CONFIGURED |
 
+## Voice channel (AssemblyAI)
+
+### `POST /api/v1/voice/assemblyai/post-call` — AssemblyAI completed-session webhook
+
+Receives signed `session.completed` notifications, fetches the authoritative session timeline artifact, stores a normalized immutable call record, and links it to every case touched during that session. Returns a retryable 503 while the timeline artifact is still being prepared.
+
+**Authorisation:** Header `X-AAI-Signature` (timestamped HMAC-SHA256 with `PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET`).
+
+**State transitions:** None. Human sign-off on affected cases becomes possible only after the transcript is recorded.
+
+**Request body:** —
+
+| Status | Response | Error codes / meaning |
+|---|---|---|
+| 200 | `PostCallOutcome` | Successful Response |
+| 400 | `ErrorResponse` | WEBHOOK_PAYLOAD_INVALID |
+| 401 | `ErrorResponse` | WEBHOOK_SIGNATURE_INVALID |
+| 422 | `HTTPValidationError` | Validation Error |
+| 503 | `ErrorResponse` | CHANNEL_NOT_CONFIGURED / WEBHOOK_ARTIFACT_PENDING / VOICE_PROVIDER_UNAVAILABLE |
+
 ## Voice channel (Twilio inbound)
 
 ### `POST /api/v1/voice/twilio/inbound` — Twilio incoming-call webhook

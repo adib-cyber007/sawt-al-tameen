@@ -5361,6 +5361,86 @@
         ]
       }
     },
+    "/api/v1/voice/assemblyai/post-call": {
+      "post": {
+        "description": "Receives signed `session.completed` notifications, fetches the authoritative session timeline artifact, stores a normalized immutable call record, and links it to every case touched during that session. Returns a retryable 503 while the timeline artifact is still being prepared.\n\n**Authorisation:** Header `X-AAI-Signature` (timestamped HMAC-SHA256 with `PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET`).\n\n**State transitions:** None. Human sign-off on affected cases becomes possible only after the transcript is recorded.",
+        "operationId": "assemblyai_post_call_api_v1_voice_assemblyai_post_call_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-AAI-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Aai-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostCallOutcome"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "WEBHOOK_PAYLOAD_INVALID"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "WEBHOOK_SIGNATURE_INVALID"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "CHANNEL_NOT_CONFIGURED / WEBHOOK_ARTIFACT_PENDING / VOICE_PROVIDER_UNAVAILABLE"
+          }
+        },
+        "summary": "AssemblyAI completed-session webhook",
+        "tags": [
+          "Voice channel (AssemblyAI)"
+        ]
+      }
+    },
     "/api/v1/voice/elevenlabs/post-call": {
       "post": {
         "description": "Receives `post_call_transcription` events, stores the transcript and analysis as an immutable call record, and adds a `CALL_RECORDED` audit event to every case the conversation touched. Idempotent per conversation (platform retries are acknowledged, not duplicated). Other event types are acknowledged and ignored.\n\n**Authorisation:** Header `elevenlabs-signature` (HMAC-SHA256 with `PREAUTH_ELEVENLABS_WEBHOOK_SECRET`).\n\n**State transitions:** None. Human sign-off on affected cases becomes possible once all their calls are recorded.",

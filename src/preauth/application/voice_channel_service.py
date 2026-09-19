@@ -67,6 +67,7 @@ def pending_conversation_ids(uow: UnitOfWork, case_id: str) -> list[str]:
 
 class VoiceChannelService:
     PLATFORM = "elevenlabs"
+    ASSEMBLYAI_PLATFORM = "assemblyai"
     LOCAL_PLATFORM = "local"
 
     def __init__(self, session_factory: sessionmaker[Session], clock: Clock):
@@ -144,6 +145,67 @@ class VoiceChannelService:
         ``call_records`` row a hosted call produces, which is what makes the "transcript before sign-off" rule
         apply identically to both channels. ``platform`` distinguishes them for anyone reading the audit trail.
         """
+        return self._record_call(
+            conversation_id=conversation_id,
+            agent_id=agent_id,
+            platform=self.LOCAL_PLATFORM,
+            status="done",
+            transcript=transcript,
+            summary=summary,
+            call_successful="unknown",
+            call_duration_secs=call_duration_secs,
+            analysis=analysis,
+            metadata=metadata,
+            event_timestamp=int(self._clock.now().timestamp()),
+            log_event="conversation_finished",
+        )
+
+    def record_assemblyai_call(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        status: str | None,
+        transcript: list[dict[str, Any]],
+        summary: str | None,
+        call_successful: str | None,
+        call_duration_secs: int | None,
+        analysis: dict[str, Any],
+        metadata: dict[str, Any],
+        event_timestamp: int | None,
+    ) -> PostCallOutcome:
+        """Persist a normalized AssemblyAI session using the same append-only audit boundary as every channel."""
+        return self._record_call(
+            conversation_id=session_id,
+            agent_id=agent_id,
+            platform=self.ASSEMBLYAI_PLATFORM,
+            status=status,
+            transcript=transcript,
+            summary=summary,
+            call_successful=call_successful,
+            call_duration_secs=call_duration_secs,
+            analysis=analysis,
+            metadata=metadata,
+            event_timestamp=event_timestamp,
+            log_event="call_recorded",
+        )
+
+    def _record_call(
+        self,
+        *,
+        conversation_id: str,
+        agent_id: str,
+        platform: str,
+        status: str | None,
+        transcript: list[dict[str, Any]],
+        summary: str | None,
+        call_successful: str | None,
+        call_duration_secs: int | None,
+        analysis: dict[str, Any] | None,
+        metadata: dict[str, Any] | None,
+        event_timestamp: int | None,
+        log_event: str,
+    ) -> PostCallOutcome:
         conversation_id_var.set(conversation_id)
         with UnitOfWork(self._session_factory, self._clock) as uow:
             existing = uow.voice.call_record(conversation_id)
@@ -158,15 +220,15 @@ class VoiceChannelService:
                 id=new_id(),
                 conversation_id=conversation_id,
                 agent_id=agent_id,
-                platform=self.LOCAL_PLATFORM,
-                status="done",
+                platform=platform,
+                status=status,
                 call_duration_secs=call_duration_secs,
                 transcript_summary=summary,
-                call_successful="unknown",
+                call_successful=call_successful,
                 transcript=transcript,
                 analysis=analysis or {},
                 call_metadata=metadata or {},
-                event_timestamp=int(self._clock.now().timestamp()),
+                event_timestamp=event_timestamp,
                 received_at=self._clock.now(),
             )
             uow.voice.add_call_record(record)
@@ -174,7 +236,7 @@ class VoiceChannelService:
             case_ids = self._link_cases(uow, record)
             uow.commit()
             logger.info(
-                "conversation_finished",
+                log_event,
                 extra={"linked_cases": len(case_ids), "turns": len(transcript)},
             )
             return PostCallOutcome(
@@ -187,41 +249,19 @@ class VoiceChannelService:
             return PostCallOutcome(accepted=False, detail=f"Event type {event.type!r} is not stored")
 
         data = PostCallData.model_validate(event.data)
-        conversation_id_var.set(data.conversation_id)
-        with UnitOfWork(self._session_factory, self._clock) as uow:
-            existing = uow.voice.call_record(data.conversation_id)
-            if existing is not None:
-                # The platform retries deliveries; storing twice would duplicate the audit trail.
-                return PostCallOutcome(
-                    accepted=True,
-                    detail="Already recorded",
-                    call_record_id=existing.id,
-                    linked_case_ids=uow.voice.case_ids_for_conversation(data.conversation_id),
-                )
-
-            analysis = data.analysis or {}
-            duration = data.metadata.get("call_duration_secs")
-            record = CallRecord(
-                id=new_id(),
-                conversation_id=data.conversation_id,
-                agent_id=data.agent_id,
-                platform=self.PLATFORM,
-                status=data.status,
-                call_duration_secs=duration if isinstance(duration, int) else None,
-                transcript_summary=analysis.get("transcript_summary"),
-                call_successful=analysis.get("call_successful"),
-                transcript=data.transcript,
-                analysis=analysis,
-                call_metadata=data.metadata,
-                event_timestamp=event.event_timestamp,
-                received_at=self._clock.now(),
-            )
-            uow.voice.add_call_record(record)
-            uow.flush()
-
-            case_ids = self._link_cases(uow, record)
-            uow.commit()
-            logger.info("call_recorded", extra={"linked_cases": len(case_ids), "turns": len(data.transcript)})
-            return PostCallOutcome(
-                accepted=True, detail="Recorded", call_record_id=record.id, linked_case_ids=case_ids
-            )
+        analysis = data.analysis or {}
+        duration = data.metadata.get("call_duration_secs")
+        return self._record_call(
+            conversation_id=data.conversation_id,
+            agent_id=data.agent_id,
+            platform=self.PLATFORM,
+            status=data.status,
+            call_duration_secs=duration if isinstance(duration, int) else None,
+            summary=analysis.get("transcript_summary"),
+            call_successful=analysis.get("call_successful"),
+            transcript=data.transcript,
+            analysis=analysis,
+            metadata=data.metadata,
+            event_timestamp=event.event_timestamp,
+            log_event="call_recorded",
+        )
