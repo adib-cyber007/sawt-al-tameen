@@ -6,12 +6,13 @@ from preauth.infrastructure.settings import RuntimeMode, Settings, VoiceProvider
 from preauth.local.config import LlmProvider, LocalSettings, SttProvider, TtsProvider
 
 
-def test_defaults_to_the_elevenlabs_channel(monkeypatch):
+def test_defaults_to_the_assemblyai_hosted_channel(monkeypatch):
     for name in ("PREAUTH_RUNTIME_MODE", "PREAUTH_GATEWAY_SECRET", "PREAUTH_VOICE_AGENT_TOKEN", "VOICE_PROVIDER"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings.from_env()
-    assert settings.runtime_mode is RuntimeMode.ELEVENLABS
-    assert settings.voice_provider is VoiceProvider.ELEVENLABS
+    assert settings.runtime_mode is RuntimeMode.HOSTED
+    assert settings.voice_provider is VoiceProvider.ASSEMBLYAI
+    assert settings.assemblyai_enabled
     assert settings.local_mode is False
 
 
@@ -56,7 +57,7 @@ def test_local_mode_is_selected_by_one_variable(monkeypatch):
 
 def test_an_unknown_runtime_mode_is_rejected_with_the_allowed_values(monkeypatch):
     monkeypatch.setenv("PREAUTH_RUNTIME_MODE", "azure")
-    with pytest.raises(ValueError, match="elevenlabs, local"):
+    with pytest.raises(ValueError, match="hosted, elevenlabs, local"):
         Settings.from_env()
 
 

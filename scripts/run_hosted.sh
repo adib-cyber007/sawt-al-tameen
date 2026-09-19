@@ -1,6 +1,6 @@
 #!/bin/sh
-# Hosted (ElevenLabs) mode, one command: backend -> Cloudflare named tunnel -> verification -> ElevenLabs agent
-# -> post-call webhook -> phone number -> summary. Reads .env. Ctrl+C stops everything it started.
+# Hosted voice mode, one command: backend -> tunnel -> verification -> AssemblyAI agents/webhooks -> phone/browser
+# -> summary. ElevenLabs remains selectable only as rollback. Reads .env; Ctrl+C stops everything it started.
 # Every step is in scripts/hosted.py; see the one-time setup in .env.example.
 set -eu
 cd "$(dirname "$0")/.."

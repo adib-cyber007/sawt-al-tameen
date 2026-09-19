@@ -1,7 +1,7 @@
 """Process entry point: ``uvicorn preauth.main:app``.
 
-Runs the ElevenLabs-facing service by default. With ``PREAUTH_RUNTIME_MODE=local`` it additionally mounts the
-local voice channel and its browser console. Both modes serve the same application, rules and review layers.
+Runs the AssemblyAI-facing hosted service by default. With ``PREAUTH_RUNTIME_MODE=local`` it additionally mounts
+the local voice channel and its browser console. Both modes serve the same application, rules and review layers.
 """
 
 from preauth.api.app import create_app

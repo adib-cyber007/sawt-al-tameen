@@ -38,7 +38,7 @@ KEYTERM_LIMIT = 100
 
 
 def _catalogue(name: str) -> dict[str, Any]:
-    return json.loads((ROOT / "knowledge_base" / name).read_text())
+    return json.loads((ROOT / "knowledge_base" / name).read_text(encoding="utf-8"))
 
 
 def keyterms() -> list[str]:
@@ -74,7 +74,7 @@ def agent_payload(
 ) -> dict[str, Any]:
     return {
         "name": name,
-        "system_prompt": (ROOT / "voice" / "system_prompt.md").read_text(),
+        "system_prompt": (ROOT / "voice" / "system_prompt.md").read_text(encoding="utf-8"),
         "greeting": FIRST_MESSAGE,
         "voice": {"voice_id": voice_id},
         "input": {
@@ -120,11 +120,11 @@ def desired_agents(*, voice_id: str, llm_model: str, api_key_for_gateway: str) -
 
 
 def _load_state() -> dict[str, Any]:
-    return json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+    return json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
 
 
 def _save_state(state: dict[str, Any]) -> None:
-    STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
+    STATE_FILE.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
 def _upsert_agents(

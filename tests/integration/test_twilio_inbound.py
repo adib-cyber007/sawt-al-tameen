@@ -128,7 +128,11 @@ def test_the_endpoint_is_disabled_until_fully_configured(services):
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "CHANNEL_NOT_CONFIGURED"
     assert set(response.json()["error"]["details"]["missing"]) == {
-        "TWILIO_AUTH_TOKEN", "PREAUTH_PUBLIC_BASE_URL", "ELEVENLABS_API_KEY", "PREAUTH_ELEVENLABS_AGENT_ID",
+        "TWILIO_AUTH_TOKEN",
+        "PREAUTH_PUBLIC_BASE_URL",
+        "ASSEMBLYAI_API_KEY",
+        "PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID",
+        "PREAUTH_ASSEMBLYAI_MEDIA_SECRET",
     }
 
 

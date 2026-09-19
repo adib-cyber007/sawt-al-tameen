@@ -55,7 +55,7 @@ FIRST_MESSAGE_EN = (
 
 
 def _catalogue(name: str) -> dict[str, Any]:
-    return json.loads((KNOWLEDGE_BASE / name).read_text())
+    return json.loads((KNOWLEDGE_BASE / name).read_text(encoding="utf-8"))
 
 
 def keyterms() -> list[str]:
@@ -93,7 +93,7 @@ def knowledge_base_documents() -> dict[str, str]:
     reads out always resolves to a document it can retrieve.
     """
     return {
-        path.stem: path.read_text()
+        path.stem: path.read_text(encoding="utf-8")
         for path in sorted(KNOWLEDGE_BASE.glob("*"))
         if path.suffix in (".md", ".json")
     }
@@ -115,7 +115,7 @@ def agent_payload(
                 "first_message": FIRST_MESSAGE_EN,
                 "language": "en",
                 "prompt": {
-                    "prompt": (ROOT / "voice" / "system_prompt.md").read_text(),
+                    "prompt": (ROOT / "voice" / "system_prompt.md").read_text(encoding="utf-8"),
                     "llm": llm,
                     "temperature": 0.1,
                     "tool_ids": tool_ids,
@@ -193,7 +193,7 @@ def main() -> int:
         return 2
 
     client = ElevenLabs(api_key)
-    state: dict[str, Any] = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+    state: dict[str, Any] = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
 
     # 1. Secret holding the Authorization header value (recreated when the token changes).
     if state.get("secret_token_digest") != _digest(token):
@@ -215,7 +215,7 @@ def main() -> int:
         else:
             tool_ids[name] = client.request("POST", "/v1/convai/tools", {"tool_config": config})["id"]
             print(f"tool: created {name}")
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
     # 3. Knowledge base (a new document is uploaded only when its content changed).
     kb_state = state.setdefault("knowledge_base", {})
@@ -224,7 +224,7 @@ def main() -> int:
             created = client.request("POST", "/v1/convai/knowledge-base/text", {"name": name, "text": text})
             kb_state[name] = {"id": created["id"], "digest": _digest(text)}
             print(f"knowledge base: uploaded {name}")
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
     knowledge_base = [
         {"type": "text", "name": name, "id": entry["id"], "usage_mode": "auto"}
         for name, entry in kb_state.items()
@@ -246,7 +246,7 @@ def main() -> int:
     else:
         state["agent_id"] = client.request("POST", "/v1/convai/agents/create", payload)["agent_id"]
         print(f"agent: created {state['agent_id']}")
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
     print(
         f"\nDone. Agent audio: {args.audio_format} in and out (Twilio register-call needs ulaw_8000).\n"

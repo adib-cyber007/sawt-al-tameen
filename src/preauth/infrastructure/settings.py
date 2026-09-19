@@ -6,6 +6,8 @@ from enum import StrEnum
 class RuntimeMode(StrEnum):
     """Which interaction channel this process serves. The application layer below is identical for both."""
 
+    HOSTED = "hosted"
+    # Accepted only for deployments upgrading from the pre-migration configuration.
     ELEVENLABS = "elevenlabs"
     LOCAL = "local"
 
@@ -39,14 +41,13 @@ class Settings:
     gateway_secret: str | None = None
     # Bearer token the voice platform presents on server-tool calls. Voice tools are disabled when unset.
     voice_agent_token: str | None = None
-    # The hosted provider is independent of local mode. ElevenLabs remains the rollback default until live
-    # AssemblyAI validation is complete.
-    voice_provider: VoiceProvider = VoiceProvider.ELEVENLABS
+    # AssemblyAI is the hosted default. ElevenLabs remains selectable as a rollback during live acceptance.
+    voice_provider: VoiceProvider = VoiceProvider.ASSEMBLYAI
     # HMAC secret of the ElevenLabs post-call webhook. The webhook endpoint is disabled when unset.
     elevenlabs_webhook_secret: str | None = None
     # Which voice channel this process exposes. ``local`` additionally mounts the local agent and its browser UI;
     # it never changes the rules, cases, review or audit layers.
-    runtime_mode: RuntimeMode = RuntimeMode.ELEVENLABS
+    runtime_mode: RuntimeMode = RuntimeMode.HOSTED
     # Inbound Twilio calls (register-call). The endpoint is disabled unless all four are set; secrets stay out of repr.
     twilio_auth_token: str | None = field(default=None, repr=False)
     elevenlabs_api_key: str | None = field(default=None, repr=False)
@@ -102,7 +103,7 @@ class Settings:
 
 
 def _runtime_mode() -> RuntimeMode:
-    raw = (os.environ.get("PREAUTH_RUNTIME_MODE") or RuntimeMode.ELEVENLABS.value).strip().lower()
+    raw = (os.environ.get("PREAUTH_RUNTIME_MODE") or RuntimeMode.HOSTED.value).strip().lower()
     try:
         return RuntimeMode(raw)
     except ValueError:
@@ -111,7 +112,7 @@ def _runtime_mode() -> RuntimeMode:
 
 
 def _voice_provider() -> VoiceProvider:
-    raw = (os.environ.get("VOICE_PROVIDER") or VoiceProvider.ELEVENLABS.value).strip().lower()
+    raw = (os.environ.get("VOICE_PROVIDER") or VoiceProvider.ASSEMBLYAI.value).strip().lower()
     try:
         return VoiceProvider(raw)
     except ValueError:
