@@ -1,7 +1,7 @@
 # Local mode
 
 The same pre-authorisation system, with every hosted dependency replaced by something that runs on your machine.
-No API key, no cloud database, no telephony provider, no ElevenLabs account, and after the models are downloaded,
+No API key, no cloud database, no telephony provider, no AssemblyAI account, and after the models are downloaded,
 no Internet connection.
 
 ```
@@ -9,8 +9,8 @@ no Internet connection.
                                 │
                  ┌──────────────┴──────────────┐
                  │                             │
-          ElevenLabs channel             Local channel
-     Scribe · Eleven v3 · Twilio     faster-whisper · Piper · Ollama
+          AssemblyAI channel             Local channel
+       Voice Agent · Twilio          faster-whisper · Piper · Ollama
                  │                             │
                  └──────────────┬──────────────┘
                                 │
@@ -32,11 +32,11 @@ the authorisation policy and the human-review mechanism are one implementation s
 
 ## What runs where
 
-| Concern | ElevenLabs mode | Local mode |
+| Concern | AssemblyAI hosted mode | Local mode |
 |---|---|---|
-| Speech recognition | Scribe v2, keyterm biasing | faster-whisper (Whisper weights via CTranslate2) |
-| Speech synthesis | Eleven v3 | Piper (ONNX neural voice, CPU) |
-| Language model | hosted, with LLM cascading | Ollama, any tool-calling model |
+| Speech recognition | Voice Agent realtime input with keyterms | faster-whisper (Whisper weights via CTranslate2) |
+| Speech synthesis | AssemblyAI Voice Agent voice | Piper (ONNX neural voice, CPU) |
+| Language model | AssemblyAI LLM Gateway | Ollama, any tool-calling model |
 | Telephony | Twilio | your browser's microphone |
 | Transcript arrives | post-call webhook, HMAC signed | written when the call ends, by the process that handled it |
 | Tools | three webhook tools | the same three, called in process |
@@ -164,7 +164,7 @@ agent applies to it, for the same reason:
 4. **Verification gates cover.** `check_coverage_rule` needs a `verification_id` from `verify_caller`.
 5. **Transcript before sign-off.** A case a local call touched cannot be decided until
    `POST /api/v1/local/conversations/{id}/finish` has stored the transcript; until then reviewers get
-   `CALL_RECORD_PENDING`, exactly as they do while an ElevenLabs post-call webhook is outstanding.
+   `CALL_RECORD_PENDING`, exactly as they do while an AssemblyAI session timeline is outstanding.
 6. **Wording.** If the model states a final approval or denial anyway, the sentence is removed before the caller
    hears it and replaced with the standard boundary line. This changes nothing about the case — it only stops the
    agent saying something the system did not do.
@@ -192,7 +192,7 @@ Events: `conversation_started`, `stt_completed`, `llm_started`, `tool_called`, `
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PREAUTH_RUNTIME_MODE` | `elevenlabs` | `local` mounts the local channel and console |
+| `PREAUTH_RUNTIME_MODE` | `hosted` | `local` mounts the local channel and console |
 | `PREAUTH_LOCAL_LLM_PROVIDER` | `ollama` | the only local provider implemented |
 | `PREAUTH_LOCAL_LLM_MODEL` | `qwen2.5-coder:7b` | any tool-calling model Ollama serves |
 | `PREAUTH_LOCAL_LLM_BASE_URL` | `http://localhost:11434` | |

@@ -11,12 +11,12 @@ onboarding requirements and escalation rules, plus a per-tier schedule of benefi
 
 ```
 knowledge_base/  ──  preauth.seed  ──▶  catalogue tables  ──▶  rules engine ──▶ recommendation
-        │                                                                             │
-        └────────────────── uploaded as the agent's knowledge base ───────────────────┘
-                     (so every cited section resolves to a retrievable document)
+        │                                                                             ▲
+        └────────────── source documents named in every returned citation ────────────┘
 ```
 
-The rules decide from the tables loaded out of those files, and the agent retrieves the same files. A coverage
+The rules decide from the tables loaded out of those files, and the agent receives their citations only through
+the authoritative tools. A coverage
 decision citing "Sawt Assurance Comprehensive Schedule of Benefits 2026, Section 4.11" points at a heading that
 exists in `knowledge_base/schedule-comprehensive.md`. There is no second coverage dataset.
 
@@ -26,8 +26,8 @@ are computed from each procedure's rule and that tier's threshold, so the data c
 ## Layers
 
 ```
-   ElevenLabs agent (hosted)      local channel (this process)      provider portal / reviewer tooling
-              │                    Whisper · Ollama · Piper                      │
+ AssemblyAI agents (hosted)      local channel (this process)      provider portal / reviewer tooling
+ browser PCM · phone PCMU         Whisper · Ollama · Piper                      │
               │                              │                                   │
               └──────────────┬───────────────┘                                   │
                              ▼                                                   ▼
@@ -48,7 +48,7 @@ engine and one case lifecycle, and a voice provider does not get its own.
 
 | Layer | Implementation |
 |---|---|
-| Conversation (hosted) | ElevenLabs agent, configured from `voice/` by `scripts/elevenlabs_setup.py` |
+| Conversation (hosted) | Two AssemblyAI stored agents configured from `voice/` by `scripts/assemblyai_setup.py`; backend browser/Twilio WebSocket bridges |
 | Conversation (local) | `local/agent.py` over `local/llm.py` (Ollama) and `local/speech.py` (faster-whisper, Piper); see [LOCAL_MODE.md](LOCAL_MODE.md) |
 | Agent / orchestration | `agent_tools/toolbox.py` (three tools), `agent_tools/voice_gateway.py` (transport adapter) |
 | Case management | `domain/case_state.py`, `application/desk_service.py` |
@@ -57,7 +57,7 @@ engine and one case lifecycle, and a voice provider does not get its own.
 | Decision / recommendation | `recommendation/engine.py` |
 | Human approval | `application/review_service.py`, `api/routes/review.py` |
 | Audit | `AuditRecorder` in `application/unit_of_work.py`; `audit_events` (append-only) |
-| Voice channel | `api/routes/voice.py`, `api/routes/local.py`, `application/voice_channel_service.py` |
+| Voice channel | `api/routes/assemblyai.py`, `api/assemblyai_bridge.py`, `api/routes/voice.py` (rollback), `api/routes/local.py`, `application/voice_channel_service.py` |
 
 `tests/unit/test_architecture.py` enforces the dependency direction: `domain`, `rules` and `recommendation` import
 nothing from outer layers or frameworks, and routes never touch the database or the rules directly.
@@ -109,14 +109,15 @@ actor types may perform it) and writes a `CASE_STATUS_CHANGED` audit event.
 2. **Review service.** A decision needs a human reviewer, the role the queue requires (`CLINICAL_REVIEWER`, or
    `MEDICAL_DIRECTOR` for escalations), assignment of the case, a rationale, and a reference to the current
    recommendation.
-3. **Agent boundary.** Three tools, none of which decides. Both voice channels authenticate as `VOICE_AGENT`
-   (`elevenlabs-agent` and `local-agent`), which the review API rejects. The local model is offered exactly the
+3. **Agent boundary.** Three tools, none of which decides. All voice channels authenticate as `VOICE_AGENT`
+   (`assemblyai-agent`, rollback `elevenlabs-agent`, or `local-agent`), which the review API rejects. The local model is offered exactly the
    toolbox's tools, so asking it to approve something returns `TOOL_NOT_FOUND`.
 4. **Verification before cover.** `check_coverage_rule` requires a `verification_id` from a successful
    `verify_caller`; an unverified or lapsed caller cannot get a coverage answer at all.
 5. **Transcript before sign-off.** A case touched by a voice conversation cannot receive any human decision until
-   that call's transcript is stored (`CALL_RECORD_PENDING`) — delivered by the ElevenLabs post-call webhook, or
-   written by the local process when the call ends. Both produce the same immutable `call_records` row, told apart
+   that call's transcript is stored (`CALL_RECORD_PENDING`) — retrieved from the AssemblyAI completed-session
+   timeline, delivered by the rollback webhook, or written by the local process when the call ends. All produce
+   the same immutable `call_records` row, told apart
    by `platform`.
 6. **Database.** A check constraint ties each decision to its resulting status; recommendations and decisions are
    append-only, so a human decision never overwrites a recommendation.
@@ -181,10 +182,11 @@ optimistic locking and returned as `CONCURRENT_MODIFICATION`.
 5. **One procedure per case.** Multi-line requests need a case per line today.
 6. **Rules content.** The ruleset is illustrative and operates on synthetic data. Real clinical policy would
    replace it, most likely with a rule-authoring workflow rather than code changes.
-7. **Voice channel.** `X-Conversation-ID` is trusted as supplied by the platform. If the post-call webhook is
-   misconfigured, reviewers are blocked by design until it is fixed.
-8. **ElevenLabs setup.** `scripts/elevenlabs_setup.py` follows the ElevenLabs API reference but has not been run
-   against a live account from this repository.
+7. **Voice channel.** AssemblyAI tool correlation uses the provider-issued session id. The rollback HTTP tool
+   transport still trusts `X-Conversation-ID`. If completed-session ingestion is misconfigured, reviewers are
+   blocked by design until webhook delivery or reconciliation succeeds.
+8. **Live provider validation.** The full offline contract suite passes, but voice quality, real audio latency,
+   identifier accuracy, rate limits and concurrent-call behavior need acceptance with project credentials.
 9. **Sensitive data.** Audit data and call transcripts contain clinical free text. Retention, access control and
    encryption policies are still needed.
 10. **Local conversation state.** A local call's turn buffer lives in the serving process. Everything that matters

@@ -703,3 +703,30 @@ Live webhook timing and reconciliation still require real AssemblyAI credentials
 
 Historical discovery and decision records above intentionally retain references to the capability that was found
 and removed. They are audit evidence, not current product behavior.
+
+### Offline validation and hosted cutover (plan steps 7–8)
+
+- Ran the complete repository suite after the realtime, post-call and English-only changes: **340 tests passed**
+  on 2026-09-19. Warnings were limited to SQLAlchemy's upstream SQLite datetime adapter deprecation and a local
+  Windows pytest-cache filesystem warning; neither affected application behavior.
+- Made AssemblyAI the application and `.env.example` hosted default. `PREAUTH_RUNTIME_MODE=hosted` replaces the
+  provider-named runtime default; the former `elevenlabs` runtime value is still accepted for existing deployments.
+- Made `scripts/run_hosted.sh` provider-aware. Its AssemblyAI path validates the API key, generates independent
+  webhook/media secrets, creates or updates both stored agents and subscriptions, loads their ids, restarts the
+  backend when needed, verifies Twilio signature enforcement and prints the application-hosted `/voice` URL.
+- Updated deployment verification for the AssemblyAI signed-webhook boundary. It deliberately does not fabricate
+  a provider session: authoritative transcript retrieval requires a real AssemblyAI session and remains a live
+  acceptance gate. The verifier cleans up its synthetic case without bypassing sign-off.
+- Added deterministic hosted-launcher tests for provider dispatch, secret separation, saved-agent-id loading and
+  tunnel-credential removal from the backend environment.
+- Updated README, architecture, local/hosted deployment and voice-agent operations documentation to make
+  AssemblyAI primary, including audio formats, session correlation, artifact reconciliation and rollback.
+- Pinned all setup/state file reads and writes to UTF-8 so the source-controlled prompt is not corrupted by the
+  Windows system code page before being sent to either provider.
+
+The ElevenLabs implementation remains present only as the approved live-acceptance rollback. It has not been
+deleted because the Phase 5 live gates still need an AssemblyAI API key, an approved voice id, representative
+English audio and a Twilio call. Removing the rollback before those measurements would violate the migration's
+sign-off requirement.
+
+Final offline rerun after the hosted-default and documentation cutover: **343 tests passed** on 2026-09-19.

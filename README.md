@@ -45,11 +45,12 @@ Ask the agent to approve something and it declines, every time, because there is
 ```
       phone call                 browser                   browser or terminal
           │                         │                               │
-    your Twilio number         talk-to link                   local agent
+    your Twilio number          /voice UI                     local agent
           │                         │                   Whisper · Ollama · Piper
  /api/v1/voice/twilio/inbound       │                               │
-  register-call ──────────▶  ElevenLabs agent                       │
-                          Scribe · LLM · Eleven v3                  │
+          │               backend realtime bridges                 │
+          └──────────────▶ AssemblyAI Voice Agents                  │
+                         PCMU phone · PCM browser                   │
                                     │                               │
                                     └───────────────┬───────────────┘
                                                     │
@@ -145,19 +146,18 @@ uv run python -m piper.download_voices en_GB-alba-medium --data-dir ./models/pip
 uv run python -m preauth.local_cli   # the same agent in a terminal, no audio needed
 ```
 
-**Hosted, with ElevenLabs.** Copy `.env.example` to `.env`, fill in the hosted section, then run one command:
+**Hosted, with AssemblyAI.** Copy `.env.example` to `.env`, set the API key, English voice id and one tunnel
+provider, then run one command:
 
 ```bash
 ./scripts/run_hosted.sh
 ```
 
-It starts the backend and a tunnel with a fixed public URL (ngrok, whose free static domain needs no domain
-purchase, or a Cloudflare named tunnel). Next it runs all 28 deployment checks through that URL and stops if any
-fail. Then it builds the agent (tools, knowledge base, English-only prompt, keyterms and μ-law audio) and
-registers the post-call webhook. Finally it prints the browser test-call link. A second run changes nothing
-that is already correct.
+It starts the backend and a stable HTTPS tunnel, runs deployment checks, creates or updates separate 24 kHz browser
+and 8 kHz PCMU phone agents, registers signed completed-session webhooks, and prints the `/voice` test page. A
+second run updates the same resources. ElevenLabs remains available only as a rollback flag during live acceptance.
 
-Guides: [local mode](docs/LOCAL_MODE.md) · [hosted deployment](docs/DEPLOYMENT.md#hosted-mode-one-command)
+Guides: [local mode](docs/LOCAL_MODE.md) · [hosted deployment](docs/DEPLOYMENT.md#one-command-hosted-mode)
 
 <p align="center">◇ ─────── ✦ ─────── ◇</p>
 
@@ -165,16 +165,15 @@ Guides: [local mode](docs/LOCAL_MODE.md) · [hosted deployment](docs/DEPLOYMENT.
 
 ## 6 ⋄ 𝐏𝐡𝐨𝐧𝐞 𝐜𝐚𝐥𝐥𝐬
 
-Calls come in on **your own Twilio number**; the number is not imported into ElevenLabs. Twilio posts each call to
-the backend, which checks Twilio's signature, registers the call with the agent through ElevenLabs'
-`register-call` API, and returns the TwiML that connects them. The one Twilio setting:
+Calls come in on **your own Twilio number**. Twilio posts each call to the backend, which verifies Twilio's
+signature and returns TwiML for a short-lived, CallSid-bound Media Stream. The backend bridges native 8 kHz PCMU
+audio to the AssemblyAI phone agent. The one Twilio setting:
 
 > Phone Numbers → Active numbers → *your number* → Voice Configuration → **A call comes in**: Webhook,
 > `https://<public URL>/api/v1/voice/twilio/inbound`, HTTP **POST**
 
-The endpoint stays switched off until `TWILIO_AUTH_TOKEN` is set, and it never accepts an unsigned request. If
-ElevenLabs cannot be reached, the caller hears a short apology rather than a dead line. Details, including the
-μ-law audio requirement: [DEPLOYMENT.md](docs/DEPLOYMENT.md#a-real-phone-number-your-own-twilio-number-via-register-call).
+The endpoint stays switched off until its Twilio, AssemblyAI agent and media-signing configuration is complete,
+and it never accepts an unsigned request. Details: [DEPLOYMENT.md](docs/DEPLOYMENT.md#twilio-phone-calling).
 
 <p align="center">◇ ─────── ✦ ─────── ◇</p>
 
@@ -225,7 +224,7 @@ src/preauth/
   application/           desk, evaluation, review, callbacks, audit, Twilio inbound
   infrastructure/        ORM, migration, repositories, logging, signature checks
   api/                   HTTP routes, schemas, error envelope
-  agent_tools/           the three tools and the ElevenLabs adapter
+  agent_tools/           the three tools and hosted-provider schema adapters
   local/                 the local channel and its browser console
 scripts/                 run, set up, verify, simulate, generate
 docs/                    architecture, deployment, voice agent, local mode, API
@@ -259,7 +258,7 @@ it may be used for a real authorisation decision.**
 
 <br>
 
-𝘉𝘶𝘪𝘭𝘵 𝘧𝘰𝘳 𝘵𝘩𝘦 𝘐𝘨𝘯𝘺𝘵𝘦 × 𝘌𝘭𝘦𝘷𝘦𝘯𝘓𝘢𝘣𝘴 𝘍𝘶𝘵𝘶𝘳𝘦 𝘰𝘧 𝘝𝘰𝘪𝘤𝘦 𝘈𝘐 𝘊𝘩𝘢𝘭𝘭𝘦𝘯𝘨𝘦, 𝘉𝘢𝘯𝘬𝘪𝘯𝘨 & 𝘐𝘯𝘴𝘶𝘳𝘢𝘯𝘤𝘦 𝘵𝘳𝘢𝘤𝘬
+𝘈 𝘷𝘰𝘪𝘤𝘦 𝘈𝘐 𝘱𝘳𝘦-𝘢𝘶𝘵𝘩𝘰𝘳𝘪𝘴𝘢𝘵𝘪𝘰𝘯 𝘳𝘦𝘧𝘦𝘳𝘦𝘯𝘤𝘦 𝘴𝘺𝘴𝘵𝘦𝘮
 
 Sawt al-Tameen
 

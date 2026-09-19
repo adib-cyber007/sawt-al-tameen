@@ -1,152 +1,158 @@
-# Voice agent (ElevenLabs)
+# Voice agent (AssemblyAI)
 
-How the ElevenLabs agent connects to this backend, what the setup script configures, and what you configure in the
-dashboard. For the same agent running entirely on your own machine — Whisper, Ollama and Piper instead of
-Scribe, a hosted model and Eleven v3, over the same three tools — see [LOCAL_MODE.md](LOCAL_MODE.md).
+AssemblyAI is the default hosted voice provider. The application owns both browser and Twilio media transports,
+keeps the provider credential on the server, and exposes the same three safety-constrained business tools used by
+local mode. Automated voice service is English-only.
 
+```mermaid
+flowchart LR
+    Browser[Browser microphone\nPCM16 mono 24 kHz] --> BWS[Backend WebSocket\n/api/v1/voice/assemblyai/browser]
+    Twilio[Twilio call\nPCMU mono 8 kHz] --> TWS[Signed Media Stream\n/api/v1/voice/assemblyai/twilio]
+    BWS --> AAI[AssemblyAI stored Voice Agent]
+    TWS --> AAI
+    AAI --> Bridge[Realtime bridge\nsession + barge-in + tool correlation]
+    Bridge --> Tools[verify_caller\ncheck_coverage_rule\nlog_transcript]
+    Tools --> Rules[Rules · recommendations · audit]
+    AAI --> Hook[Signed session.completed webhook]
+    Hook --> Timeline[Sessions API timeline artifact]
+    Timeline --> Record[Immutable call record]
+    Record --> Review[Human review can proceed]
 ```
- caller (phone via Twilio, or browser)
-        │  audio
-        ▼
- ElevenLabs agent ── Scribe STT + keyterms ── LLM (+ fallback) ── Eleven v3 TTS ── Knowledge base (RAG)
-        │                                                                          knowledge_base/
-        │  server tools: POST /api/v1/voice/tools/{tool}   (Bearer token, X-Conversation-ID)
-        ▼
- this backend ── catalogue · rules · recommendations · audit ── human reviewers (/api/v1/review/...)
-        ▲
-        │  post-call webhook: POST /api/v1/voice/elevenlabs/post-call   (HMAC signed transcript + analysis)
- ElevenLabs
+
+## What is provisioned
+
+`scripts/assemblyai_setup.py` idempotently creates two stored agents from the same source-controlled English
+prompt and tool schemas:
+
+| Agent | Input/output | Why separate |
+|---|---|---|
+| Browser | signed PCM16 mono, 24 kHz | Native browser capture/playback without telephony degradation |
+| Phone | G.711 PCMU mono, 8 kHz | Native Twilio Media Streams format; no application transcoding |
+
+Both agents use:
+
+- `voice/system_prompt.md`, which forbids final decisions and non-English automated intake;
+- exactly `verify_caller`, `check_coverage_rule`, and `log_transcript`;
+- AssemblyAI LLM Gateway with `gemini-2.5-flash` by default;
+- source-derived keyterms for policy ids, procedure codes, providers and UAE terminology;
+- a `session.completed` subscription pointing at `/api/v1/voice/assemblyai/post-call`.
+
+The generated ids and subscription ids are in git-ignored `.assemblyai-state.json`. Re-running updates the same
+resources rather than creating duplicates.
+
+## Configure and provision
+
+Set these values in `.env`:
+
+```dotenv
+VOICE_PROVIDER=assemblyai
+ASSEMBLYAI_API_KEY=...
+PREAUTH_ASSEMBLYAI_VOICE_ID=...
 ```
 
-## Identity and terminology
-
-The agent is the in-house pre-authorisation line for **Sawt Assurance**, a fictional UAE insurer. It administers
-pre-authorisation itself rather than through a third-party administrator, and says so if asked, so there is one
-consistent story on the call.
-
-Terminology follows UAE practice (see the research notes in the project report):
-
-- **Pre-authorisation / prior authorisation** for the request; **authorisation reference** is avoided in favour of
-  the concrete case reference the tools return.
-- **Turnaround:** elective outpatient within six working hours, elective inpatient within 24 hours, emergencies
-  immediately with written confirmation within 24 hours. These mirror the DHA claims directive in force in 2026.
-- **Document channels:** the provider portal, or **eClaimLink** (Dubai) and **Shafafiya** (Abu Dhabi).
-- **Emirates ID** is the identifier UAE providers normally use for eligibility; this line verifies with the policy
-  number plus date of birth, and the member records carry an Emirates ID for future use.
-- "Letter of guarantee" / "LOG" is **not** used: research did not confirm it as standard UAE insurer usage, so the
-  agent says "case reference" instead of risking a wrong term.
-
-## How the guardrails are enforced
-
-1. **No decision tool exists.** Three tools, none of which approves, denies or finalises
-   (`tests/integration/test_agent_tools.py`).
-2. **Verification gates coverage.** `check_coverage_rule` requires a `verification_id` from a successful
-   `verify_caller`, so a greeting-stage or unverified call cannot obtain a coverage answer.
-3. **Escalations cite a rule.** Ambiguous cases return the ESC-### rule from `knowledge_base/escalation_rules.json`
-   with its text, not a generic "needs review".
-4. **Sources are real.** Coverage answers cite the tier's schedule and section, which exist as documents in the
-   agent's knowledge base.
-5. **Transcripts precede sign-off.** A case touched by a call cannot be decided until its transcript is stored.
-
-All five hold for the local channel too, because all five are enforced below the voice provider.
-
-## 1. Run the setup script
-
-Prerequisite: the backend is running on a public HTTPS URL with `PREAUTH_VOICE_AGENT_TOKEN` set (see
-[DEPLOYMENT.md](DEPLOYMENT.md)), and the catalogue loaded (`python -m preauth.seed`).
+`scripts/run_hosted.sh` generates independent webhook/media secrets, provisions both agents, restarts the backend
+with their ids, and prints the browser and Twilio URLs. To inspect payloads without network writes:
 
 ```bash
-export ELEVENLABS_API_KEY=...            # ElevenLabs → Developers → API keys
-export PREAUTH_PUBLIC_BASE_URL=https://your-backend.example
-export PREAUTH_VOICE_AGENT_TOKEN=...     # the same value the backend uses
-
-uv run python scripts/elevenlabs_setup.py --dry-run   # inspect what will be sent
-uv run python scripts/elevenlabs_setup.py
+python scripts/assemblyai_setup.py --dry-run
 ```
 
-It creates or updates, in one run:
+To provision manually, also set `PREAUTH_PUBLIC_BASE_URL` and
+`PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET`, then run:
 
-- a workspace secret holding `Bearer <token>`;
-- the three webhook tools, with schemas generated from the backend's own input models;
-- the knowledge base: every file in `knowledge_base/` (tiers, procedures, providers, members, onboarding, the four
-  per-tier schedules, and the escalation rules);
-- the agent: English-only system prompt from `voice/system_prompt.md`, English first message, the `end_call`
-  system tool, Eleven v3 conversational TTS, and 100 speech
-  keyterms (procedure codes, tier and network names, provider numbers, identifier prefixes).
+```bash
+python scripts/assemblyai_setup.py
+```
 
-IDs are kept in `.elevenlabs-state.json`, so re-running updates in place. Options: `--llm`, `--tts-model`
-(use `eleven_flash_v2_5` if v3 conversational is unavailable on your plan) and `--voice-id`.
+The REST API uses AssemblyAI's raw API-key `Authorization` value. The realtime WebSocket uses
+`Authorization: Bearer <key>`. This difference is intentional and covered by tests. The API key never appears in
+browser JavaScript, TwiML, logs, or stored call metadata.
 
-> The script follows the ElevenLabs API reference as of September 2026 but has not been run against a live account
-> from this repository. If a request is rejected it prints ElevenLabs' error body; the dashboard steps below are
-> the fallback.
+## Browser calls
 
-## 2. Dashboard configuration
+With hosted mode running, open:
 
-### Post-call webhook (required before any sign-off)
+```text
+https://<public-base-url>/voice
+```
 
-1. Workspace settings → Webhooks → create an HMAC webhook pointing at
-   `https://<your-backend>/api/v1/voice/elevenlabs/post-call`.
-2. Copy the signing secret into `PREAUTH_ELEVENLABS_WEBHOOK_SECRET` and restart the backend.
-3. In the agent's post-call webhook setting, select it and enable transcription events.
+The page captures mono audio, resamples it to signed PCM16 at 24 kHz, streams it through the backend, plays
+provider audio incrementally, displays transcript events, and cancels buffered playback when the caller
+interrupts. The backend starts the stored browser agent only after the browser WebSocket is accepted.
 
-Without this, reviewers get `CALL_RECORD_PENDING` on every case the agent touched. That is deliberate.
+## Twilio calls
 
-### Workflow and per-node tool scoping
+Point the Twilio number's incoming-call webhook to:
 
-Build this in Agent → Workflow. The greeting node has no access to `check_coverage_rule`, which is also enforced in
-the backend by the verification requirement.
+```text
+POST https://<public-base-url>/api/v1/voice/twilio/inbound
+```
 
-| Node | Purpose | Tools |
-|---|---|---|
-| Greeting & triage | Identify caller type; route callers who cannot continue in English | none |
-| Verification | Organisation, provider number, member policy and date of birth | `verify_caller` |
-| Request intake | Collect procedure, cost, date; read back for confirmation | none |
-| Rules check | Check the request; explain documents or escalation | `check_coverage_rule` |
-| Close & log | Record the outcome, read back references | `log_transcript`, `end_call` |
-| Human handoff | Supplier, complaint, unsupported language, repeated failure | `log_transcript`, `end_call` |
+The endpoint verifies `X-Twilio-Signature` and returns TwiML containing a 90-second media token bound to the
+Twilio `CallSid`. The media WebSocket verifies the token and the `start.callSid` before forwarding audio. PCMU is
+passed through at 8 kHz; on caller interruption the bridge clears Twilio's queued output.
 
-Edges: greeting → verification for clinics and brokers; greeting → human handoff for suppliers, patients and
-out-of-scope calls; verification → request intake only when `authorised` is true, otherwise → human handoff; rules
-check → close & log in all cases.
+Required phone configuration:
 
-### Language, LLM fallback and analysis
+```dotenv
+TWILIO_AUTH_TOKEN=...
+PREAUTH_PUBLIC_BASE_URL=https://...
+PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID=...     # populated by hosted setup
+PREAUTH_ASSEMBLYAI_MEDIA_SECRET=...       # generated by hosted setup
+```
 
-- English is the only automated voice language. Callers who cannot continue in English are routed to a human
-  callback; the agent must not attempt to translate or continue the pre-authorisation flow in another language.
-- Enable a backup model (LLM cascading) so a primary-model timeout does not drop a live call.
-- Evaluation criteria to add under Analysis:
-  - `no_decision_given` — never said or implied approved/denied, never disclosed an internal recommendation outcome.
-  - `identifiers_confirmed` — read back the policy number, procedure code, amount and date before checking.
-  - `verification_before_policy_detail` — discussed no policy detail before `verify_caller` returned authorised.
-  - `correct_routing` — complete requests prepared for sign-off; ambiguous ones escalated with a reason.
-  - `reference_given` — caller received the case reference or call reference.
-- Data collection: `case_reference`, `call_reference`, `caller_role`, `call_language`, `procedure_code`.
+## Tools and session correlation
 
-### Agent tests
+AssemblyAI function calls execute in the backend through the existing `VoiceToolGateway` with the authoritative
+AssemblyAI `session_id`. Tool results are sent only after the associated reply completes; interrupted replies do
+not leak stale results into a later turn. No function exists that can approve, deny, or finalise a case.
 
-`voice/agent_tests.json` holds five ready-made definitions matching the scenarios the backend already proves:
-high-stakes refusal, clean approval recommendation, ambiguous escalation, lapsed member, and an unsupported-language
-callback. Each lists expected and forbidden tool calls. Create them under Agent → Tests and run each several
-times for a pass rate.
+That same `session_id` is written to every tool invocation. It later becomes the call-record conversation id, so
+a reviewer sees `CALL_RECORD_PENDING` until the exact session transcript is durable.
 
-### Voice
+## Post-call transcript and reconciliation
 
-`--voice-id` defaults to a neutral, professional Voice Library voice rather than a consumer-warm one. Before
-finalising, preview it in your workspace on a spoken policy number and an SP-code sequence
-("P-O-L dash S-A dash 2026 dash 100001", "S-P-2-0-0-4-0") and confirm the digits are crisp. That check needs your
-account; it cannot be done from this repository.
+The signed webhook is a notification, not the transcript. The application:
 
-## 3. Talk to it
+1. verifies `X-AAI-Signature` against the raw body with a five-minute replay window;
+2. fetches the authoritative session from the Voice Agent Sessions API;
+3. returns retryable `503 WEBHOOK_ARTIFACT_PENDING` while the timeline artifact is unavailable;
+4. downloads the pre-signed timeline without attaching the API key;
+5. normalizes caller, agent and tool turns plus latency/confidence/interruption metrics;
+6. stores one immutable call record and links it to every case touched by that session.
 
-- **Browser (free):** `https://elevenlabs.io/app/talk-to?agent_id=<agent_id>`, printed by the setup script.
-- **Phone:** see [DEPLOYMENT.md → Phone numbers](DEPLOYMENT.md#phone-numbers-what-is-and-isnt-free).
+Deliveries are idempotent by session id. Pre-signed artifact URLs are never persisted. If delivery was exhausted
+or missed, run:
 
-Synthetic data to use on a call:
+```bash
+python scripts/assemblyai_reconcile.py
+python scripts/assemblyai_reconcile.py --agent-id <agent-id> --limit 500
+```
 
-| Item | Values |
-|---|---|
-| Providers | `PRV-30011` Al Hudaiba Crescent Hospital (Basic network, orthopaedics), `PRV-30023` Yas Horizon (Comprehensive, bariatric), `PRV-30020` Mirdif Vision (suspended), `PRV-30030` Gulf Meridian (Executive only) |
-| Members | `POL-SA-2026-100001` / 1986-04-17 (Executive), `POL-SA-2026-100003` / 1991-07-29 (Basic), `POL-SA-2026-100011` / 1981-05-02 (Comprehensive), `POL-SA-2026-100008` / 1990-12-04 (lapsed) |
-| Procedures | `SP-20040` arthroscopy (covered, needs 3 documents), `SP-20050` knee replacement (Enhanced and above), `SP-20110` sleeve gastrectomy (escalates, ESC-001), `SP-20140` cosmetic rhinoplasty (excluded), `SP-10010` chest X-ray (no pre-auth needed) |
-| Onboarding | `ONB-APP-2026-0007` (two documents outstanding) |
+## English-only behavior
+
+The automated line always responds in English. If a caller cannot continue in English, it takes a name and
+callback number, logs `OUT_OF_SCOPE`, and routes the request to a person. It does not translate or continue the
+pre-authorisation flow. `voice/agent_tests.json` includes this behavior as a provider-dashboard acceptance case.
+
+## Verification and live acceptance
+
+Offline tests cover audio formats, realtime events, tool correlation, barge-in, signed media tokens, webhook
+authentication/replay protection, artifact delay, provider errors, duplicate delivery, reconciliation semantics,
+and the transcript-before-sign-off invariant.
+
+Real credentials and representative English audio are still required to accept:
+
+- selected voice quality and pronunciation of policy/procedure identifiers;
+- browser and Twilio first-transcript/first-audio latency;
+- interruption, silence, background noise and disconnect behavior;
+- concurrent-call limits, rate limiting, webhook delay and reconciliation;
+- transcription accuracy versus the pre-migration baseline.
+
+Record measured results in `MIGRATION_LOG.md` before removing the rollback provider.
+
+## Rollback
+
+Set `VOICE_PROVIDER=elevenlabs`, restore the old ElevenLabs variables/webhook target, and restart. The legacy
+adapter, setup script, webhook endpoint, tests, and state file remain during live acceptance. Rollback does not
+delete or modify AssemblyAI agents or subscriptions.
