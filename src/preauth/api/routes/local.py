@@ -8,7 +8,7 @@ services through the same agent toolbox as the ElevenLabs channel.
 import hmac
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Header, Path, Query, Request
+from fastapi import APIRouter, Body, Header, Path, Request
 
 from preauth.api.actor import ActorRequiredError
 from preauth.api.errors import ErrorResponse
@@ -134,7 +134,6 @@ def say(
 async def listen(
     request: Request,
     conversation_id: ConversationId,
-    language: Annotated[str | None, Query(description="Two-letter language hint, e.g. en or ar")] = None,
     x_gateway_secret: Secret = None,
 ) -> dict[str, Any]:
     from starlette.concurrency import run_in_threadpool
@@ -142,7 +141,7 @@ async def listen(
     runtime = _runtime(request, x_gateway_secret)
     payload = await request.body()
     # Recognition, generation and synthesis are all blocking CPU work; keep them off the event loop.
-    return await run_in_threadpool(runtime.listen, conversation_id, payload, language)
+    return await run_in_threadpool(runtime.listen, conversation_id, payload)
 
 
 @router.get(

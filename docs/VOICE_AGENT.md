@@ -70,8 +70,8 @@ It creates or updates, in one run:
 - the three webhook tools, with schemas generated from the backend's own input models;
 - the knowledge base: every file in `knowledge_base/` (tiers, procedures, providers, members, onboarding, the four
   per-tier schedules, and the escalation rules);
-- the agent: system prompt from `voice/system_prompt.md`, English default with an Arabic preset and Arabic first
-  message, `end_call` and `language_detection` system tools, Eleven v3 conversational TTS, and 100 speech
+- the agent: English-only system prompt from `voice/system_prompt.md`, English first message, the `end_call`
+  system tool, Eleven v3 conversational TTS, and 100 speech
   keyterms (procedure codes, tier and network names, provider numbers, identifier prefixes).
 
 IDs are kept in `.elevenlabs-state.json`, so re-running updates in place. Options: `--llm`, `--tts-model`
@@ -99,7 +99,7 @@ the backend by the verification requirement.
 
 | Node | Purpose | Tools |
 |---|---|---|
-| Greeting & triage | Identify caller type; detect language | `language_detection` |
+| Greeting & triage | Identify caller type; route callers who cannot continue in English | none |
 | Verification | Organisation, provider number, member policy and date of birth | `verify_caller` |
 | Request intake | Collect procedure, cost, date; read back for confirmation | none |
 | Rules check | Check the request; explain documents or escalation | `check_coverage_rule` |
@@ -110,9 +110,10 @@ Edges: greeting → verification for clinics and brokers; greeting → human han
 out-of-scope calls; verification → request intake only when `authorised` is true, otherwise → human handoff; rules
 check → close & log in all cases.
 
-### Languages, LLM fallback and analysis
+### Language, LLM fallback and analysis
 
-- English is the default; Arabic is configured as a language preset. Keep language detection enabled.
+- English is the only automated voice language. Callers who cannot continue in English are routed to a human
+  callback; the agent must not attempt to translate or continue the pre-authorisation flow in another language.
 - Enable a backup model (LLM cascading) so a primary-model timeout does not drop a live call.
 - Evaluation criteria to add under Analysis:
   - `no_decision_given` — never said or implied approved/denied, never disclosed an internal recommendation outcome.
@@ -125,8 +126,8 @@ check → close & log in all cases.
 ### Agent tests
 
 `voice/agent_tests.json` holds five ready-made definitions matching the scenarios the backend already proves:
-high-stakes refusal, clean approval recommendation, ambiguous escalation, lapsed member, and an Arabic supplier
-onboarding call. Each lists expected and forbidden tool calls. Create them under Agent → Tests and run each several
+high-stakes refusal, clean approval recommendation, ambiguous escalation, lapsed member, and an unsupported-language
+callback. Each lists expected and forbidden tool calls. Create them under Agent → Tests and run each several
 times for a pass rate.
 
 ### Voice

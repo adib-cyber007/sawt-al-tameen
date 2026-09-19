@@ -527,7 +527,7 @@ Transcribes the request body with the local speech recogniser, then handles the 
 
 **State transitions:** Those of the tools the agent calls. Never `APPROVED` or `DENIED`.
 
-**Parameters:** `conversation_id` (path), `language` (query)
+**Parameters:** `conversation_id` (path)
 
 **Request body:** —
 

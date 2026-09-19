@@ -3934,24 +3934,6 @@
             }
           },
           {
-            "description": "Two-letter language hint, e.g. en or ar",
-            "in": "query",
-            "name": "language",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Two-letter language hint, e.g. en or ar",
-              "title": "Language"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Gateway-Secret",
             "required": false,

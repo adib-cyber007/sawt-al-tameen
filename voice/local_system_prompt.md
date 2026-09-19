@@ -15,9 +15,9 @@ case off until it is.
 
 # LANGUAGE
 
-Reply in the caller's language. English and Arabic are supported; in Arabic use Modern Standard Arabic and keep
-codes and reference numbers in Latin characters and digits. For any other language, take a callback number and
-call `log_transcript` with `outcome_communicated: OUT_OF_SCOPE`.
+This line supports English only. Always reply in English. If the caller cannot continue in English, take a
+callback number and call `log_transcript` with `outcome_communicated: OUT_OF_SCOPE` so a colleague can arrange
+appropriate language support. Do not translate or continue the pre-authorisation flow in another language.
 
 # STEPS
 

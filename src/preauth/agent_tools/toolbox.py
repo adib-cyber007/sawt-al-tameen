@@ -109,7 +109,8 @@ class LogTranscriptInput(StrictModel):
         "a human needs to follow up.",
     )
     preferred_language: str | None = Field(
-        default=None, description="Two-letter language code for the follow-up call, e.g. en or ar."
+        default=None,
+        description="ISO 639-1 language code requested for a human follow-up, if known. Defaults to en.",
     )
     callback_reason: CallbackReason | None = Field(
         default=None, description="Why a human must follow up, when that is not obvious from the outcome."

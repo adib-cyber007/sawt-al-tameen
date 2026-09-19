@@ -96,12 +96,13 @@ def test_a_spoken_turn_is_transcribed_from_the_raw_request_body(local_client):
     conversation = client.post("/api/v1/local/conversations").json()["conversation_id"]
 
     turn = client.post(
-        f"/api/v1/local/conversations/{conversation}/audio?language=en",
+        f"/api/v1/local/conversations/{conversation}/audio",
         content=b"fake-webm-bytes",
         headers={"Content-Type": "audio/webm"},
     ).json()
     assert harness.transcriber.calls == [b"fake-webm-bytes"]
     assert turn["heard"] == "Aisha at Al Hudaiba, PRV-30011"
+    assert turn["heard_language"] == "en"
 
 
 def test_an_unknown_conversation_is_a_404_not_a_new_call(local_client):

@@ -2,16 +2,16 @@
 
 <img src="docs/assets/sawt-al-tameen-art.png" alt="Sawt al-Tameen, a voice agent for health-insurance pre-authorisation" width="100%">
 
-<h1>صوت التأمين</h1>
+<h1>Sawt al-Tameen</h1>
 
 <h3>𝐒 𝐀 𝐖 𝐓  𝐀 𝐋  𝐓 𝐀 𝐌 𝐄 𝐄 𝐍</h3>
 
 𝘛𝘩𝘦 𝘷𝘰𝘪𝘤𝘦 𝘰𝘧 𝘪𝘯𝘴𝘶𝘳𝘢𝘯𝘤𝘦
 
-A bilingual voice line that takes pre-authorisation calls for a UAE health insurer,<br>
+An English-language voice line that takes pre-authorisation calls for a UAE health insurer,<br>
 checks every request against the benefit schedule, and leaves the decision to a person.
 
-English and Arabic ⋄ AED throughout ⋄ Dubai, Abu Dhabi and Sharjah ⋄ DHA and DOH structure
+English only ⋄ AED throughout ⋄ Dubai, Abu Dhabi and Sharjah ⋄ DHA and DOH structure
 
 [The rule](#rule) · [How a call flows](#flow) · [Tools](#tools) · [Catalogue](#catalogue) · [Run it](#run) ·
 [Phone calls](#phone) · [Testing](#testing) · [Layout](#layout) · [Docs](#docs)
@@ -22,7 +22,7 @@ English and Arabic ⋄ AED throughout ⋄ Dubai, Abu Dhabi and Sharjah ⋄ DHA a
 
 <a id="rule"></a>
 
-## ١ ⋄ 𝐓𝐡𝐞 𝐫𝐮𝐥𝐞 𝐭𝐡𝐚𝐭 𝐬𝐡𝐚𝐩𝐞𝐬 𝐞𝐯𝐞𝐫𝐲𝐭𝐡𝐢𝐧𝐠 · القاعدة
+## 1 ⋄ 𝐓𝐡𝐞 𝐫𝐮𝐥𝐞 𝐭𝐡𝐚𝐭 𝐬𝐡𝐚𝐩𝐞𝐬 𝐞𝐯𝐞𝐫𝐲𝐭𝐡𝐢𝐧𝐠
 
 An automated line must never tell a clinic that treatment is approved or denied. Here that is not an instruction
 the model could be talked out of. It is how the software is built:
@@ -40,7 +40,7 @@ Ask the agent to approve something and it declines, every time, because there is
 
 <a id="flow"></a>
 
-## ٢ ⋄ 𝐇𝐨𝐰 𝐚 𝐜𝐚𝐥𝐥 𝐟𝐥𝐨𝐰𝐬 · مسار المكالمة
+## 2 ⋄ 𝐇𝐨𝐰 𝐚 𝐜𝐚𝐥𝐥 𝐟𝐥𝐨𝐰𝐬
 
 ```
       phone call                 browser                   browser or terminal
@@ -75,7 +75,7 @@ Ask the agent to approve something and it declines, every time, because there is
 
 <a id="tools"></a>
 
-## ٣ ⋄ 𝐓𝐡𝐫𝐞𝐞 𝐭𝐨𝐨𝐥𝐬, 𝐚𝐧𝐝 𝐧𝐨𝐭𝐡𝐢𝐧𝐠 𝐞𝐥𝐬𝐞 · الأدوات
+## 3 ⋄ 𝐓𝐡𝐫𝐞𝐞 𝐭𝐨𝐨𝐥𝐬, 𝐚𝐧𝐝 𝐧𝐨𝐭𝐡𝐢𝐧𝐠 𝐞𝐥𝐬𝐞
 
 | Tool | Purpose |
 |---|---|
@@ -90,7 +90,7 @@ answer before they have been identified.
 
 <a id="catalogue"></a>
 
-## ٤ ⋄ 𝐓𝐡𝐞 𝐛𝐞𝐧𝐞𝐟𝐢𝐭 𝐜𝐚𝐭𝐚𝐥𝐨𝐠𝐮𝐞 · جدول المنافع
+## 4 ⋄ 𝐓𝐡𝐞 𝐛𝐞𝐧𝐞𝐟𝐢𝐭 𝐜𝐚𝐭𝐚𝐥𝐨𝐠𝐮𝐞
 
 [`knowledge_base/`](knowledge_base/README.md) is the single source of truth. The rules engine decides from it and
 the agent retrieves the same files. When the agent cites *"Section 4.14 of the Executive Schedule of Benefits"*,
@@ -119,7 +119,7 @@ hands the case to a person, and the escalation quotes that rule's own words:
 
 <a id="run"></a>
 
-## ٥ ⋄ 𝐑𝐮𝐧 𝐢𝐭 · التشغيل
+## 5 ⋄ 𝐑𝐮𝐧 𝐢𝐭
 
 Requires Python 3.12 and [uv](https://docs.astral.sh/uv/). Docker is optional; it is only needed for PostgreSQL.
 
@@ -153,7 +153,7 @@ uv run python -m preauth.local_cli   # the same agent in a terminal, no audio ne
 
 It starts the backend and a tunnel with a fixed public URL (ngrok, whose free static domain needs no domain
 purchase, or a Cloudflare named tunnel). Next it runs all 28 deployment checks through that URL and stops if any
-fail. Then it builds the agent (tools, knowledge base, prompt, Arabic preset, keyterms and μ-law audio) and
+fail. Then it builds the agent (tools, knowledge base, English-only prompt, keyterms and μ-law audio) and
 registers the post-call webhook. Finally it prints the browser test-call link. A second run changes nothing
 that is already correct.
 
@@ -163,7 +163,7 @@ Guides: [local mode](docs/LOCAL_MODE.md) · [hosted deployment](docs/DEPLOYMENT.
 
 <a id="phone"></a>
 
-## ٦ ⋄ 𝐏𝐡𝐨𝐧𝐞 𝐜𝐚𝐥𝐥𝐬 · الهاتف
+## 6 ⋄ 𝐏𝐡𝐨𝐧𝐞 𝐜𝐚𝐥𝐥𝐬
 
 Calls come in on **your own Twilio number**; the number is not imported into ElevenLabs. Twilio posts each call to
 the backend, which checks Twilio's signature, registers the call with the agent through ElevenLabs'
@@ -180,7 +180,7 @@ ElevenLabs cannot be reached, the caller hears a short apology rather than a dea
 
 <a id="testing"></a>
 
-## ٧ ⋄ 𝐓𝐞𝐬𝐭𝐢𝐧𝐠 · الاختبار
+## 7 ⋄ 𝐓𝐞𝐬𝐭𝐢𝐧𝐠
 
 ```bash
 uv run pytest                                             # SQLite
@@ -213,7 +213,7 @@ After changing routes, schemas or the catalogue, regenerate the derived files:
 
 <a id="layout"></a>
 
-## ٨ ⋄ 𝐑𝐞𝐩𝐨𝐬𝐢𝐭𝐨𝐫𝐲 𝐥𝐚𝐲𝐨𝐮𝐭 · المستودع
+## 8 ⋄ 𝐑𝐞𝐩𝐨𝐬𝐢𝐭𝐨𝐫𝐲 𝐥𝐚𝐲𝐨𝐮𝐭
 
 ```
 knowledge_base/          the benefit catalogue — schedules, procedures, providers, members, escalation rules
@@ -247,7 +247,7 @@ docs/                    architecture, deployment, voice agent, local mode, API
 
 <a id="fictional"></a>
 
-## ٩ ⋄ 𝐄𝐯𝐞𝐫𝐲𝐭𝐡𝐢𝐧𝐠 𝐡𝐞𝐫𝐞 𝐢𝐬 𝐟𝐢𝐜𝐭𝐢𝐨𝐧𝐚𝐥 · من نسج الخيال
+## 9 ⋄ 𝐄𝐯𝐞𝐫𝐲𝐭𝐡𝐢𝐧𝐠 𝐡𝐞𝐫𝐞 𝐢𝐬 𝐟𝐢𝐜𝐭𝐢𝐨𝐧𝐚𝐥
 
 Sawt Assurance is an invented insurer. Every member, provider, policy number, licence number and tariff is
 synthetic, and procedure codes use a deliberately fictional `SP-#####` scheme rather than CPT. The structure
@@ -261,6 +261,6 @@ it may be used for a real authorisation decision.**
 
 𝘉𝘶𝘪𝘭𝘵 𝘧𝘰𝘳 𝘵𝘩𝘦 𝘐𝘨𝘯𝘺𝘵𝘦 × 𝘌𝘭𝘦𝘷𝘦𝘯𝘓𝘢𝘣𝘴 𝘍𝘶𝘵𝘶𝘳𝘦 𝘰𝘧 𝘝𝘰𝘪𝘤𝘦 𝘈𝘐 𝘊𝘩𝘢𝘭𝘭𝘦𝘯𝘨𝘦, 𝘉𝘢𝘯𝘬𝘪𝘯𝘨 & 𝘐𝘯𝘴𝘶𝘳𝘢𝘯𝘤𝘦 𝘵𝘳𝘢𝘤𝘬
 
-صوت التأمين
+Sawt al-Tameen
 
 </div>

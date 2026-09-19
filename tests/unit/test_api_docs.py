@@ -22,7 +22,9 @@ def test_elevenlabs_setup_dry_run_builds_payloads():
     payload = json.loads(result.stdout)
     assert len(payload["tools"]) == 3
     agent = payload["agent"]["conversation_config"]
-    assert "ar" in agent["language_presets"]
+    assert agent["agent"]["language"] == "en"
+    assert agent["language_presets"] == {}
+    assert "language_detection" not in agent["agent"]["prompt"]["built_in_tools"]
     assert agent["asr"]["keywords"]
     prompt = agent["agent"]["prompt"]["prompt"]
     assert "never issue a final approval or denial" in prompt.lower()

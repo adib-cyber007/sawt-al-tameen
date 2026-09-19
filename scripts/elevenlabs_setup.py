@@ -52,9 +52,6 @@ FIRST_MESSAGE_EN = (
     "Sawt Assurance pre-authorisation line, this is an automated assistant. The call is recorded for audit. "
     "Who am I speaking with?"
 )
-FIRST_MESSAGE_AR = (
-    "خط التفويض المسبق في صوت التأمين، أنا مساعد آلي. يتم تسجيل هذه المكالمة لأغراض التدقيق. مع من أتحدث؟"
-)
 
 
 def _catalogue(name: str) -> dict[str, Any]:
@@ -124,16 +121,13 @@ def agent_payload(
                     "tool_ids": tool_ids,
                     "built_in_tools": {
                         "end_call": system_tool("end_call"),
-                        "language_detection": system_tool("language_detection"),
                     },
                     "knowledge_base": knowledge_base,
                 },
             },
             "asr": {"keywords": keyterms(), "user_input_audio_format": audio_format},
             "tts": {"voice_id": voice_id, "model_id": tts_model, "agent_output_audio_format": audio_format},
-            "language_presets": {
-                "ar": {"overrides": {"agent": {"first_message": FIRST_MESSAGE_AR, "language": "ar"}}},
-            },
+            "language_presets": {},
         },
     }
 

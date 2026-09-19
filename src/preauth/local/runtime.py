@@ -101,9 +101,10 @@ class LocalRuntime:
         payload["decision_language_blocked"] = turn.decision_language_blocked
         return payload
 
-    def listen(self, conversation_id: str, audio: bytes, language: str | None = None) -> dict[str, Any]:
+    def listen(self, conversation_id: str, audio: bytes) -> dict[str, Any]:
         session = self._open(conversation_id)
-        transcription = self.transcriber.transcribe(audio, language)
+        # Local voice support is intentionally English-only, matching the hosted AssemblyAI agent.
+        transcription = self.transcriber.transcribe(audio, "en")
         logger.info(
             "stt_completed",
             extra={

@@ -686,3 +686,20 @@ behavior still require AssemblyAI credentials during Phase 5.
 
 Verification: 38 focused unit, integration, architecture and legacy voice-channel tests passed on 2026-09-19.
 Live webhook timing and reconciliation still require real AssemblyAI credentials during Phase 5.
+
+### English-only voice scope (plan step 6)
+
+- Removed the non-English voice preset, alternate first message and automatic language-switching tool from the
+  retained ElevenLabs rollback provisioner. Rollback now preserves business continuity without reintroducing the
+  removed language behavior.
+- Both hosted and local system prompts now explicitly require English responses. A caller who cannot continue in
+  English is routed to `OUT_OF_SCOPE` human follow-up; the agent must not translate or continue automated intake.
+- Replaced the non-English dashboard scenario with an English-only unsupported-language callback test.
+- The local audio endpoint no longer accepts a caller-selectable language hint. Local transcription is explicitly
+  pinned to English, matching the hosted AssemblyAI target.
+- Removed bilingual product claims, non-English branding copy and obsolete setup instructions from current user
+  documentation. Generic human-callback language metadata remains because it routes work to a person rather than
+  claiming automated voice support.
+
+Historical discovery and decision records above intentionally retain references to the capability that was found
+and removed. They are audit evidence, not current product behavior.

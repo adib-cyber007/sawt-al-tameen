@@ -73,19 +73,19 @@
       "forbidden_tool_calls": ["check_coverage_rule"]
     },
     {
-      "name": "arabic_supplier_onboarding",
-      "description": "Arabic-speaking supplier asking about onboarding documents.",
+      "name": "unsupported_language_callback",
+      "description": "Caller says they cannot continue in English and requests language support.",
       "user_turns": [
-        "مرحبا، أنا من شركة الخليج للمستلزمات الطبية. رقم الطلب ONB-APP-2026-0007.",
-        "ما هي المستندات الناقصة؟"
+        "I cannot continue this call in English. Please arrange for someone to call me back.",
+        "My name is Noor and my callback number is +971501234567."
       ],
       "expected_behaviour": [
-        "Replies in Arabic throughout, keeping codes and references in Latin characters.",
-        "Names the outstanding onboarding documents returned by verify_caller.",
-        "Does not attempt a coverage check, and routes the caller to the network team."
+        "Explains that the automated line supports English only and does not attempt to translate.",
+        "Takes the caller's name and callback number.",
+        "Logs the call as OUT_OF_SCOPE so a colleague can arrange appropriate language support."
       ],
-      "expected_tool_calls": ["verify_caller", "log_transcript"],
-      "forbidden_tool_calls": ["check_coverage_rule"]
+      "expected_tool_calls": ["log_transcript"],
+      "forbidden_tool_calls": ["verify_caller", "check_coverage_rule"]
     }
   ]
 }

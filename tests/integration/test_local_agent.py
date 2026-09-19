@@ -348,7 +348,7 @@ def test_the_agent_must_speak_once_its_tool_budget_is_spent(local):
 def test_spoken_turns_go_through_the_local_recogniser(local):
     harness = local(says("Verified."), heard="Aisha at Al Hudaiba, PRV-30011")
     conversation = harness.start()
-    turn = harness.runtime.listen(conversation, b"fake-webm-audio", "en")
+    turn = harness.runtime.listen(conversation, b"fake-webm-audio")
 
     assert harness.transcriber.calls == [b"fake-webm-audio"]
     assert turn["heard"] == "Aisha at Al Hudaiba, PRV-30011"
