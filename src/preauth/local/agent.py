@@ -2,7 +2,7 @@
 
 The agent orchestrates; it does not decide. Every fact it states about eligibility, cover, documents, limits or
 outcome arrives as the result of a tool call made in the same turn, through the *same* ``VoiceToolGateway`` the
-ElevenLabs channel uses. There is no local rules engine, no local catalogue lookup and no local case handling.
+hosted AssemblyAI channel uses. There is no local rules engine, no local catalogue lookup and no local case handling.
 
 Three things are enforced here rather than asked for in the prompt:
 

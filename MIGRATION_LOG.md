@@ -753,3 +753,20 @@ credentialed call can measure audible continuity inside the provider's real 30-s
 
 Verification after the recovery change: **348 tests passed** on 2026-09-19. The six warnings were the existing
 SQLAlchemy/SQLite Python 3.12 deprecation and local Windows pytest-cache warning; no application test failed.
+
+### Primary-provider documentation audit
+
+- Removed stale instructions that still told operators to upload the catalogue to ElevenLabs or use its dashboard
+  for current acceptance. The AssemblyAI agents receive only source-derived recognition keyterms; all coverage
+  facts, rules and citations continue to come from application tools backed by the authoritative catalogue.
+- Updated the Hugging Face deployment guide with the AssemblyAI agent ids, API key, completed-session secret,
+  media-stream secret and public URL required by the current hosted architecture.
+- Made provider-neutral and local-module descriptions identify AssemblyAI as the current hosted channel while
+  retaining precise ElevenLabs names only in rollback-specific code, tests and instructions.
+- Corrected the deterministic conversation harness so its documented one-command invocation migrates a fresh
+  database before seeding and running its five scenarios. Added a subprocess test proving a fresh database runs
+  30 safety checks successfully.
+
+Verification after the documentation/tooling audit: catalogue regeneration check passed, AssemblyAI dry-run
+produced PCM16/24 kHz and PCMU/8 kHz agents with exactly the three allowed tools, the deterministic harness passed
+**5 scenarios / 30 checks**, and the complete suite passed **349 tests** on 2026-09-19.

@@ -61,16 +61,19 @@ Useful demo calls:
 - Eligibility: any request for a lapsed member (`MBR-2026-0008`, `MBR-2026-0013`, `MBR-2026-0020`) — ESC-007.
 - Provider problem: a request from `PRV-30020` (suspended) or `PRV-30016` (onboarding) — ESC-008.
 
-## Loading into the ElevenLabs Knowledge Base
+## Using the catalogue with AssemblyAI
 
-Upload every file in this folder as a knowledge-base document, or run:
+The catalogue stays in this application; it is not uploaded to the voice provider. Load it into the application
+database, then provision the AssemblyAI agents:
 
 ```bash
-uv run python scripts/elevenlabs_setup.py --include-uae-knowledge-base
+uv run python -m preauth.seed
+uv run python scripts/assemblyai_setup.py
 ```
 
-JSON is uploaded as text, which retrieval handles well for lookups by code or name. `escalation_rules.md` and this
-README carry the prose the model reasons over.
+`assemblyai_setup.py` derives recognition keyterms from the catalogue, but coverage facts, rules and citations
+reach the agent only through the application's three constrained tools. This keeps the database/rules engine as
+the authoritative source and prevents provider-side document retrieval from bypassing application guardrails.
 
 ## Consistency and regeneration
 
@@ -86,10 +89,10 @@ uv run python scripts/generate_uae_knowledge_base.py --check
 
 ## How the backend uses these files
 
-`preauth.seed` loads this catalogue into the database, and the rules engine decides from those tables. The same
-files are the agent's knowledge base. That is why every citation the agent reads out resolves to a section that
-exists here: the per-tier schedules carry the `Section 4.n` headings the coverage rules cite, and
-`escalation_rules.md` carries the ESC-### text an escalation quotes.
+`preauth.seed` loads this catalogue into the database, and the rules engine evaluates those tables. Every citation
+the agent reads out comes from a tool result and resolves to a section that exists here: the per-tier schedules
+carry the `Section 4.n` headings the coverage rules cite, and `escalation_rules.md` carries the ESC-### text an
+escalation quotes.
 
 There is no second source of coverage data anywhere in the repository. Editing this catalogue (through the
 generator) changes what the agent decides.

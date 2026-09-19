@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -67,3 +68,16 @@ def test_uae_knowledge_base_is_current_and_consistent():
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_conversation_simulation_runs_from_a_fresh_database(tmp_path):
+    database = tmp_path / "simulation.db"
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "simulate_conversations.py"), "--quiet"],
+        cwd=ROOT,
+        env={**os.environ, "PREAUTH_DATABASE_URL": f"sqlite:///{database.as_posix()}"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "5 scenarios" in result.stdout and "0 failed" in result.stdout

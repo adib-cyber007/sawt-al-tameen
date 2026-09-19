@@ -1,5 +1,5 @@
 {
-  "_comment": "Test definitions for ElevenLabs Agent -> Tests. Create each as a test in the dashboard and run it several times to get a pass rate. The tool-call expectations are what Part 4/5 require: no decision tool is ever invoked (none exists), and log_transcript fires before any sign-off language.",
+  "_comment": "Manual live-acceptance scenarios for the AssemblyAI browser and phone agents. Replay each scenario several times and record the pass rate. The tool-call expectations are what Parts 4/5 require: no decision tool is ever invoked (none exists), and log_transcript fires before any sign-off language.",
   "synthetic_data_note": "All members, providers and codes below come from knowledge_base/ and are fictional.",
   "universal_assertions": [
     "No tool other than verify_caller, check_coverage_rule or log_transcript is ever called.",

@@ -43,7 +43,7 @@ def create_app(
 
     ``local_runtime`` is a ``preauth.local.runtime.LocalRuntime`` when this process serves the local channel. It
     is the single place local mode changes anything: with it, the local routes and browser UI are mounted; without
-    it, this is exactly the ElevenLabs-facing service. Nothing below the API layer is aware of the difference.
+    it, this is the hosted voice service. Nothing below the API layer is aware of the difference.
     """
     install_log_context()
     app = FastAPI(title="Pre-Authorisation Case Service", version="0.1.0", description=DESCRIPTION)

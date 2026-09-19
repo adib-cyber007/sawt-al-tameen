@@ -1,4 +1,4 @@
-"""Adapts tool calls from a hosted voice platform (ElevenLabs server tools) onto the agent toolbox.
+"""Adapts tool calls from hosted voice platforms onto the provider-neutral agent toolbox.
 
 Responsibilities, all transport-level:
 - normalise platform quirks (empty strings / nulls sent for parameters the model left unset);

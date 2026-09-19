@@ -21,12 +21,20 @@ Set these as Space secrets (Settings → Variables and secrets):
 | Secret | Purpose |
 |---|---|
 | `PREAUTH_DATABASE_URL` | Hosted Postgres URL (e.g. Neon). Without it the database is wiped on restart. |
-| `PREAUTH_VOICE_AGENT_TOKEN` | Bearer token for the ElevenLabs tool calls |
+| `VOICE_PROVIDER` | Set to `assemblyai` (the default). |
+| `ASSEMBLYAI_API_KEY` | AssemblyAI Voice Agent REST, WebSocket and Sessions API credential. |
+| `PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID` | Stored browser-agent id created by `scripts/assemblyai_setup.py`. |
+| `PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID` | Stored PCMU phone-agent id created by `scripts/assemblyai_setup.py`. |
+| `PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET` | Verifies completed-session deliveries from AssemblyAI. |
+| `PREAUTH_ASSEMBLYAI_MEDIA_SECRET` | Signs short-lived Twilio media-stream URLs. |
+| `PREAUTH_PUBLIC_BASE_URL` | Stable public HTTPS URL of this Space. |
+| `PREAUTH_VOICE_AGENT_TOKEN` | Deployment-verifier token; also retained for the rollback HTTP-tool route. |
 | `PREAUTH_GATEWAY_SECRET` | Required on staff and reviewer APIs |
-| `PREAUTH_ELEVENLABS_WEBHOOK_SECRET` | Post-call webhook signing secret |
 | `PREAUTH_SEED_SCENARIOS` | Optional: set to `1` to create the five demo cases on first start |
 
-The Space must be **public** so ElevenLabs can reach the webhook and tool endpoints.
+For Twilio calls, also configure `TWILIO_AUTH_TOKEN` and point the number's incoming-call webhook at
+`<PREAUTH_PUBLIC_BASE_URL>/api/v1/voice/twilio/inbound`. The Space must be **public** so browsers, Twilio and
+AssemblyAI can reach the media and completed-session endpoints.
 
 On first start the container runs the migration and loads the benefit catalogue from `knowledge_base/`, which is
-the same data the agent's knowledge base is built from.
+the authoritative data queried by the agent's constrained tools.

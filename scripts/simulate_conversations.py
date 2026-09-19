@@ -1,11 +1,11 @@
 """Scripted call simulations against the real backend tools.
 
-This is a deterministic harness, not the ElevenLabs model: the caller turns are scripted and the agent turns are
+This is a deterministic harness, not the AssemblyAI agent: the caller turns are scripted and the agent turns are
 written to match the system prompt. What is real is every tool call and every result, so the scenarios prove what
 the backend does with a call of that shape, including the guardrails.
 
-Run the same five scenarios against the live agent in the ElevenLabs dashboard (Agent -> Tests / Simulate
-conversations) to exercise the model's own behaviour; see voice/agent_tests.json.
+Use the related live scenarios in `voice/agent_tests.json` against the AssemblyAI browser and phone agents to
+exercise the model's own behaviour.
 
     uv run python scripts/simulate_conversations.py            # transcripts + assertions
     uv run python scripts/simulate_conversations.py --quiet    # assertions only
@@ -13,6 +13,10 @@ conversations) to exercise the model's own behaviour; see voice/agent_tests.json
 
 import sys
 from datetime import date, timedelta
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
 
 from preauth.application.commands import CoverageCheckCommand, LogTranscriptCommand, VerifyCallerCommand
 from preauth.application.services import build_services
@@ -23,7 +27,8 @@ from preauth.infrastructure.db.session import build_engine, build_session_factor
 from preauth.infrastructure.settings import Settings
 from preauth.seed.catalogue import is_loaded, load_catalogue
 
-AGENT = Actor(ActorType.VOICE_AGENT, "elevenlabs-agent")
+ROOT = Path(__file__).resolve().parents[1]
+AGENT = Actor(ActorType.VOICE_AGENT, "assemblyai-agent")
 PORTAL = Actor(ActorType.PROVIDER_PORTAL, "provider-portal")
 TREATMENT = (date.today() + timedelta(days=21)).isoformat()
 
@@ -322,8 +327,17 @@ def result_outcome(result) -> str:
     return result.outcome.value
 
 
+def _migrate(database_url: str) -> None:
+    """Make the advertised one-command harness work against a new disposable database."""
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "migrations"))
+    config.attributes["database_url"] = database_url
+    command.upgrade(config, "head")
+
+
 def main() -> int:
     settings = Settings.from_env()
+    _migrate(settings.database_url)
     engine = build_engine(settings.database_url)
     session_factory = build_session_factory(engine)
     with session_factory() as session:

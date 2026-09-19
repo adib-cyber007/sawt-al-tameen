@@ -1,7 +1,7 @@
 """Presenting the existing agent tools to a local model.
 
 No tool is defined here. The list, the names, the descriptions and the argument schemas all come from
-``preauth.agent_tools.toolbox``, the same source the ElevenLabs adapter reads, so the local agent can never
+``preauth.agent_tools.toolbox``, the same source every hosted adapter reads, so the local agent can never
 acquire a capability the hosted agent does not have. This module only reshapes those schemas into the flat form
 small local models handle reliably (references resolved, optional types collapsed, enums listed inline).
 """
