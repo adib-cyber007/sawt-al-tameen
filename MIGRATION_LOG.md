@@ -730,3 +730,26 @@ English audio and a Twilio call. Removing the rollback before those measurements
 sign-off requirement.
 
 Final offline rerun after the hosted-default and documentation cutover: **343 tests passed** on 2026-09-19.
+
+## Phase 5 — validation progress
+
+### Bounded realtime session recovery
+
+- Re-audited the browser and Twilio relay against AssemblyAI's current event contract. The provider preserves a
+  disconnected session for 30 seconds and requires `session.resume` with the id from `session.ready` as the first
+  event on the replacement WebSocket.
+- Implemented provider reconnection for both transports. Recovery keeps the original AssemblyAI session id,
+  Twilio stream id, pending tool boundary and transcript correlation. It is capped at three attempts within the
+  preservation window, with short exponential delays and structured session/attempt/close-code logging.
+- A failed or expired resume is not replaced with a new provider session. Starting fresh would silently discard
+  conversational context and break the session-id link used by the transcript-before-sign-off control, so the
+  client receives only a generic `1011 Voice service unavailable` close.
+- Normal browser/Twilio termination and Twilio call-identity rejection never trigger provider reconnection.
+- Added deterministic tests for browser recovery, Twilio stream-id continuity, bounded retry, resume refusal and
+  non-disclosure of upstream error details.
+
+Live disconnect timing remains an acceptance gate: offline tests prove protocol and safety behavior, but only a
+credentialed call can measure audible continuity inside the provider's real 30-second window.
+
+Verification after the recovery change: **348 tests passed** on 2026-09-19. The six warnings were the existing
+SQLAlchemy/SQLite Python 3.12 deprecation and local Windows pytest-cache warning; no application test failed.

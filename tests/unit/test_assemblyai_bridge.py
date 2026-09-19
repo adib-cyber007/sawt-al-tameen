@@ -19,8 +19,9 @@ class FakeGateway:
 
 
 class FakeProvider:
-    def __init__(self, events):
+    def __init__(self, events, error=None):
         self.events = events
+        self.error = error
         self.sent = []
 
     async def __aenter__(self):
@@ -36,6 +37,8 @@ class FakeProvider:
         for event in self.events:
             await asyncio.sleep(0)
             yield json.dumps(event)
+        if self.error:
+            raise self.error
 
 
 class FakeClientSocket:
@@ -194,3 +197,146 @@ def test_twilio_bridge_maps_pcmu_audio_barge_in_and_tool_results(monkeypatch):
         {"event": "media", "streamSid": "MZ123", "media": {"payload": "outbound-pcmu"}},
         {"event": "clear", "streamSid": "MZ123"},
     ]
+
+
+def test_browser_bridge_resumes_the_same_provider_session_after_a_network_drop(monkeypatch):
+    first = FakeProvider(
+        [{"type": "session.ready", "session_id": "sess_resume"}],
+        error=OSError("connection dropped"),
+    )
+    resumed = FakeProvider(
+        [
+            {"type": "session.ready", "session_id": "sess_resume"},
+            {"type": "transcript.user", "text": "still connected"},
+        ]
+    )
+    providers = iter([first, resumed])
+    client = FakeClientSocket([])
+    monkeypatch.setattr(assemblyai_bridge, "connect", lambda *args, **kwargs: next(providers))
+
+    async def no_delay(_):
+        return None
+
+    monkeypatch.setattr(assemblyai_bridge.asyncio, "sleep", no_delay)
+    settings = Settings(
+        voice_provider=VoiceProvider.ASSEMBLYAI,
+        assemblyai_api_key="secret",
+        assemblyai_browser_agent_id="agent_browser",
+    )
+
+    asyncio.run(assemblyai_bridge.bridge_browser(client, settings, FakeGateway()))
+
+    assert first.sent[0] == {
+        "type": "session.update",
+        "session": {"agent_id": "agent_browser"},
+    }
+    assert resumed.sent[0] == {"type": "session.resume", "session_id": "sess_resume"}
+    assert client.sent[-1] == {"type": "transcript.user", "text": "still connected"}
+
+
+def test_twilio_bridge_resumes_without_losing_the_stream_identity(monkeypatch):
+    first = FakeProvider(
+        [{"type": "session.ready", "session_id": "sess_phone_resume"}],
+        error=OSError("connection dropped"),
+    )
+    resumed = FakeProvider(
+        [
+            {"type": "session.ready", "session_id": "sess_phone_resume"},
+            {"type": "reply.audio", "data": "resumed-pcmu"},
+        ]
+    )
+    providers = iter([first, resumed])
+    twilio = FakeClientSocket(
+        [{"event": "start", "start": {"callSid": "CA123", "streamSid": "MZ123"}}]
+    )
+    monkeypatch.setattr(assemblyai_bridge, "connect", lambda *args, **kwargs: next(providers))
+
+    async def no_delay(_):
+        return None
+
+    monkeypatch.setattr(assemblyai_bridge.asyncio, "sleep", no_delay)
+    settings = Settings(
+        voice_provider=VoiceProvider.ASSEMBLYAI,
+        assemblyai_api_key="secret",
+        assemblyai_phone_agent_id="agent_phone",
+    )
+
+    asyncio.run(assemblyai_bridge.bridge_twilio(twilio, settings, FakeGateway(), "CA123"))
+
+    assert resumed.sent[0] == {"type": "session.resume", "session_id": "sess_phone_resume"}
+    assert twilio.sent == [
+        {"event": "media", "streamSid": "MZ123", "media": {"payload": "resumed-pcmu"}}
+    ]
+
+
+def test_resume_attempts_are_bounded_and_preserve_the_original_session_id(monkeypatch):
+    coordinator = AssemblyAIToolCoordinator(FakeGateway())
+    attempts = []
+
+    async def connect_once(session_id):
+        attempts.append(session_id)
+        if session_id is None:
+            await coordinator.handle({"type": "session.ready", "session_id": "sess_bounded"})
+        raise OSError("upstream unavailable")
+
+    async def no_delay(_):
+        return None
+
+    monkeypatch.setattr(assemblyai_bridge.asyncio, "sleep", no_delay)
+    try:
+        asyncio.run(assemblyai_bridge._run_resumable(coordinator, connect_once))
+    except assemblyai_bridge.AssemblyAIResumeError:
+        pass
+    else:
+        raise AssertionError("unbounded AssemblyAI resume loop")
+
+    assert attempts == [None, "sess_bounded", "sess_bounded", "sess_bounded"]
+
+
+def test_resume_refusal_fails_closed_without_starting_a_fresh_session(monkeypatch):
+    first = FakeProvider(
+        [{"type": "session.ready", "session_id": "sess_expired"}],
+        error=OSError("connection dropped"),
+    )
+    refused = FakeProvider(
+        [
+            {
+                "type": "session.error",
+                "code": "session_expired",
+                "message": "provider detail must not reach the client",
+            }
+        ]
+    )
+    providers = iter([first, refused])
+    client = FakeClientSocket([])
+    monkeypatch.setattr(assemblyai_bridge, "connect", lambda *args, **kwargs: next(providers))
+
+    async def no_delay(_):
+        return None
+
+    monkeypatch.setattr(assemblyai_bridge.asyncio, "sleep", no_delay)
+    settings = Settings(
+        voice_provider=VoiceProvider.ASSEMBLYAI,
+        assemblyai_api_key="secret",
+        assemblyai_browser_agent_id="agent_browser",
+    )
+
+    async def scenario():
+        await assemblyai_bridge.close_after_bridge(
+            client, assemblyai_bridge.bridge_browser(client, settings, FakeGateway())
+        )
+
+    asyncio.run(scenario())
+
+    assert refused.sent[0] == {"type": "session.resume", "session_id": "sess_expired"}
+    assert client.closed == [(1011, "Voice service unavailable")]
+
+
+def test_bridge_failures_close_the_client_without_leaking_upstream_details():
+    client = FakeClientSocket([])
+
+    async def failure():
+        raise OSError("provider response contained private details")
+
+    asyncio.run(assemblyai_bridge.close_after_bridge(client, failure()))
+    assert client.closed == [(1011, "Voice service unavailable")]

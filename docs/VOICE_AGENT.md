@@ -110,6 +110,11 @@ not leak stale results into a later turn. No function exists that can approve, d
 That same `session_id` is written to every tool invocation. It later becomes the call-record conversation id, so
 a reviewer sees `CALL_RECORD_PENDING` until the exact session transcript is durable.
 
+If the upstream WebSocket drops after `session.ready`, the bridge reconnects with `session.resume` and the same
+session id. Recovery is limited to three attempts inside AssemblyAI's 30-second preservation window. Browser or
+Twilio termination, call-identity failures, and refused/expired resumes are not converted into a fresh session:
+the bridge fails closed instead of losing conversation context or transcript correlation.
+
 ## Post-call transcript and reconciliation
 
 The signed webhook is a notification, not the transcript. The application:
@@ -139,13 +144,13 @@ pre-authorisation flow. `voice/agent_tests.json` includes this behavior as a pro
 
 Offline tests cover audio formats, realtime events, tool correlation, barge-in, signed media tokens, webhook
 authentication/replay protection, artifact delay, provider errors, duplicate delivery, reconciliation semantics,
-and the transcript-before-sign-off invariant.
+bounded browser/Twilio session resumption, and the transcript-before-sign-off invariant.
 
 Real credentials and representative English audio are still required to accept:
 
 - selected voice quality and pronunciation of policy/procedure identifiers;
 - browser and Twilio first-transcript/first-audio latency;
-- interruption, silence, background noise and disconnect behavior;
+- interruption, silence, background noise and live disconnect/resume behavior;
 - concurrent-call limits, rate limiting, webhook delay and reconciliation;
 - transcription accuracy versus the pre-migration baseline.
 

@@ -8,6 +8,7 @@ enforce its transcript-before-signoff invariant after the call.
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -20,6 +21,13 @@ from preauth.infrastructure import assemblyai_media_token
 from preauth.infrastructure.settings import Settings
 
 logger = logging.getLogger("preauth.voice.assemblyai.bridge")
+RESUME_WINDOW_SECONDS = 30
+MAX_RESUME_ATTEMPTS = 3
+_UPSTREAM_ERRORS = (ConnectionClosed, WebSocketException, TimeoutError, OSError)
+
+
+class AssemblyAIResumeError(RuntimeError):
+    """The provider session could not be resumed without losing correlation or conversation context."""
 
 
 class AssemblyAIToolCoordinator:
@@ -28,6 +36,7 @@ class AssemblyAIToolCoordinator:
     def __init__(self, gateway: VoiceToolGateway):
         self._gateway = gateway
         self.session_id: str | None = None
+        self.ready_count = 0
         self._pending: list[dict[str, Any]] = []
 
     async def handle(self, event: dict[str, Any]) -> list[dict[str, Any]]:
@@ -36,6 +45,7 @@ class AssemblyAIToolCoordinator:
             session_id = event.get("session_id")
             if isinstance(session_id, str) and session_id:
                 self.session_id = session_id
+                self.ready_count += 1
             return []
 
         if event_type == "tool.call":
@@ -110,122 +120,208 @@ async def _run_pair(left: Callable[[], Awaitable[None]], right: Callable[[], Awa
             raise exc
 
 
+async def _run_resumable(
+    coordinator: AssemblyAIToolCoordinator,
+    connect_once: Callable[[str | None], Awaitable[None]],
+) -> None:
+    """Reconnect abnormal provider drops within AssemblyAI's documented 30-second resume window."""
+    deadline: float | None = None
+    attempts = 0
+    while True:
+        ready_before = coordinator.ready_count
+        try:
+            await connect_once(coordinator.session_id)
+            return
+        except _UPSTREAM_ERRORS as exc:
+            # A connection that reached session.ready starts a fresh recovery window, including after a
+            # successful resume followed by a later independent network drop.
+            now = time.monotonic()
+            if coordinator.ready_count > ready_before:
+                deadline = now + RESUME_WINDOW_SECONDS
+                attempts = 0
+            if not coordinator.session_id or deadline is None:
+                raise
+            attempts += 1
+            if attempts > MAX_RESUME_ATTEMPTS or now >= deadline:
+                raise AssemblyAIResumeError("AssemblyAI session resume window was exhausted") from exc
+            logger.warning(
+                "assemblyai_session_reconnecting",
+                extra={
+                    "session_id": coordinator.session_id,
+                    "attempt": attempts,
+                    "close_code": getattr(exc, "code", None),
+                },
+            )
+            await asyncio.sleep(min(0.25 * (2 ** (attempts - 1)), max(0.0, deadline - now)))
+
+
 async def bridge_browser(websocket: WebSocket, settings: Settings, gateway: VoiceToolGateway) -> None:
-    ready = asyncio.Event()
     coordinator = AssemblyAIToolCoordinator(gateway)
-    async with connect(
-        settings.assemblyai_ws_url,
-        additional_headers={"Authorization": f"Bearer {settings.assemblyai_api_key}"},
-        open_timeout=10,
-        ping_interval=20,
-        ping_timeout=20,
-    ) as provider:
-        await _send_provider(
-            provider,
-            {"type": "session.update", "session": {"agent_id": settings.assemblyai_browser_agent_id}},
-        )
+    client_active = True
 
-        async def from_browser() -> None:
-            try:
-                while True:
-                    event = await websocket.receive_json()
-                    event_type = event.get("type") if isinstance(event, dict) else None
-                    if event_type == "input.audio" and isinstance(event.get("audio"), str):
-                        await ready.wait()
-                        await _send_provider(provider, {"type": "input.audio", "audio": event["audio"]})
-                    elif event_type == "session.end":
+    async def connect_once(resume_session_id: str | None) -> None:
+        nonlocal client_active
+        ready = asyncio.Event()
+        async with connect(
+            settings.assemblyai_ws_url,
+            additional_headers={"Authorization": f"Bearer {settings.assemblyai_api_key}"},
+            open_timeout=10,
+            ping_interval=20,
+            ping_timeout=20,
+        ) as provider:
+            if resume_session_id:
+                await _send_provider(
+                    provider, {"type": "session.resume", "session_id": resume_session_id}
+                )
+            else:
+                await _send_provider(
+                    provider,
+                    {"type": "session.update", "session": {"agent_id": settings.assemblyai_browser_agent_id}},
+                )
+
+            async def from_browser() -> None:
+                nonlocal client_active
+                try:
+                    while True:
+                        event = await websocket.receive_json()
+                        event_type = event.get("type") if isinstance(event, dict) else None
+                        if event_type == "input.audio" and isinstance(event.get("audio"), str):
+                            await ready.wait()
+                            await _send_provider(provider, {"type": "input.audio", "audio": event["audio"]})
+                        elif event_type == "session.end":
+                            client_active = False
+                            await _send_provider(provider, {"type": "session.end"})
+                            return
+                except WebSocketDisconnect:
+                    client_active = False
+                    try:
                         await _send_provider(provider, {"type": "session.end"})
-            except WebSocketDisconnect:
-                await _send_provider(provider, {"type": "session.end"})
+                    except _UPSTREAM_ERRORS:
+                        pass
 
-        async def from_provider() -> None:
-            async for raw in provider:
-                event = json.loads(raw)
-                if event.get("type") == "session.ready":
-                    ready.set()
-                    logger.info("assemblyai_browser_session_ready", extra={"session_id": event.get("session_id")})
-                for result in await coordinator.handle(event):
-                    await _send_provider(provider, result)
-                safe = _safe_browser_event(event)
-                if safe is not None:
-                    await websocket.send_json(safe)
+            async def from_provider() -> None:
+                async for raw in provider:
+                    event = json.loads(raw)
+                    if event.get("type") == "session.ready":
+                        ready.set()
+                        logger.info(
+                            "assemblyai_browser_session_ready", extra={"session_id": event.get("session_id")}
+                        )
+                    if event.get("type") == "session.error" and event.get("code") in {
+                        "session_not_found", "session_forbidden", "session_expired"
+                    }:
+                        raise AssemblyAIResumeError("AssemblyAI refused to resume the session")
+                    for result in await coordinator.handle(event):
+                        await _send_provider(provider, result)
+                    safe = _safe_browser_event(event)
+                    if safe is not None:
+                        await websocket.send_json(safe)
 
-        await _run_pair(from_browser, from_provider)
+            await _run_pair(from_browser, from_provider)
+
+    await _run_resumable(coordinator, connect_once)
+    if not client_active:
+        return
 
 
 async def bridge_twilio(
     websocket: WebSocket, settings: Settings, gateway: VoiceToolGateway, expected_call_sid: str
 ) -> None:
-    provider_ready, twilio_ready = asyncio.Event(), asyncio.Event()
     coordinator = AssemblyAIToolCoordinator(gateway)
     stream_sid: str | None = None
-    async with connect(
-        settings.assemblyai_ws_url,
-        additional_headers={"Authorization": f"Bearer {settings.assemblyai_api_key}"},
-        open_timeout=10,
-        ping_interval=20,
-        ping_timeout=20,
-    ) as provider:
-        await _send_provider(
-            provider,
-            {"type": "session.update", "session": {"agent_id": settings.assemblyai_phone_agent_id}},
-        )
+    client_active = True
 
-        async def from_twilio() -> None:
-            nonlocal stream_sid
-            try:
-                while True:
-                    event = await websocket.receive_json()
-                    event_type = event.get("event") if isinstance(event, dict) else None
-                    if event_type == "start":
-                        start = event.get("start", {})
-                        if start.get("callSid") != expected_call_sid:
-                            logger.warning("assemblyai_twilio_call_sid_mismatch")
-                            await websocket.close(code=1008, reason="Twilio call identity did not match")
+    async def connect_once(resume_session_id: str | None) -> None:
+        nonlocal stream_sid, client_active
+        provider_ready, twilio_ready = asyncio.Event(), asyncio.Event()
+        if stream_sid:
+            twilio_ready.set()
+        async with connect(
+            settings.assemblyai_ws_url,
+            additional_headers={"Authorization": f"Bearer {settings.assemblyai_api_key}"},
+            open_timeout=10,
+            ping_interval=20,
+            ping_timeout=20,
+        ) as provider:
+            if resume_session_id:
+                await _send_provider(
+                    provider, {"type": "session.resume", "session_id": resume_session_id}
+                )
+            else:
+                await _send_provider(
+                    provider,
+                    {"type": "session.update", "session": {"agent_id": settings.assemblyai_phone_agent_id}},
+                )
+
+            async def from_twilio() -> None:
+                nonlocal stream_sid, client_active
+                try:
+                    while True:
+                        event = await websocket.receive_json()
+                        event_type = event.get("event") if isinstance(event, dict) else None
+                        if event_type == "start":
+                            start = event.get("start", {})
+                            if start.get("callSid") != expected_call_sid:
+                                client_active = False
+                                logger.warning("assemblyai_twilio_call_sid_mismatch")
+                                await websocket.close(code=1008, reason="Twilio call identity did not match")
+                                return
+                            candidate = start.get("streamSid") or event.get("streamSid")
+                            if isinstance(candidate, str) and candidate:
+                                stream_sid = candidate
+                                twilio_ready.set()
+                        elif event_type == "media" and event.get("media", {}).get("track", "inbound") == "inbound":
+                            payload = event.get("media", {}).get("payload")
+                            if isinstance(payload, str):
+                                await provider_ready.wait()
+                                await _send_provider(provider, {"type": "input.audio", "audio": payload})
+                        elif event_type == "stop":
+                            client_active = False
+                            await _send_provider(provider, {"type": "session.end"})
                             return
-                        candidate = start.get("streamSid") or event.get("streamSid")
-                        if isinstance(candidate, str) and candidate:
-                            stream_sid = candidate
-                            twilio_ready.set()
-                    elif event_type == "media" and event.get("media", {}).get("track", "inbound") == "inbound":
-                        payload = event.get("media", {}).get("payload")
-                        if isinstance(payload, str):
-                            await provider_ready.wait()
-                            await _send_provider(provider, {"type": "input.audio", "audio": payload})
-                    elif event_type == "stop":
+                except WebSocketDisconnect:
+                    client_active = False
+                    try:
                         await _send_provider(provider, {"type": "session.end"})
-                        return
-            except WebSocketDisconnect:
-                await _send_provider(provider, {"type": "session.end"})
+                    except _UPSTREAM_ERRORS:
+                        pass
 
-        async def from_provider() -> None:
-            async for raw in provider:
-                event = json.loads(raw)
-                event_type = event.get("type")
-                if event_type == "session.ready":
-                    provider_ready.set()
-                    logger.info(
-                        "assemblyai_twilio_session_ready",
-                        extra={"session_id": event.get("session_id"), "call_sid": expected_call_sid},
-                    )
-                for result in await coordinator.handle(event):
-                    await _send_provider(provider, result)
-                if event_type == "reply.audio" and isinstance(event.get("data"), str):
-                    await twilio_ready.wait()
-                    await websocket.send_json(
-                        {"event": "media", "streamSid": stream_sid, "media": {"payload": event["data"]}}
-                    )
-                elif event_type == "input.speech.started" and twilio_ready.is_set():
-                    await websocket.send_json({"event": "clear", "streamSid": stream_sid})
+            async def from_provider() -> None:
+                async for raw in provider:
+                    event = json.loads(raw)
+                    event_type = event.get("type")
+                    if event_type == "session.ready":
+                        provider_ready.set()
+                        logger.info(
+                            "assemblyai_twilio_session_ready",
+                            extra={"session_id": event.get("session_id"), "call_sid": expected_call_sid},
+                        )
+                    if event_type == "session.error" and event.get("code") in {
+                        "session_not_found", "session_forbidden", "session_expired"
+                    }:
+                        raise AssemblyAIResumeError("AssemblyAI refused to resume the session")
+                    for result in await coordinator.handle(event):
+                        await _send_provider(provider, result)
+                    if event_type == "reply.audio" and isinstance(event.get("data"), str):
+                        await twilio_ready.wait()
+                        await websocket.send_json(
+                            {"event": "media", "streamSid": stream_sid, "media": {"payload": event["data"]}}
+                        )
+                    elif event_type == "input.speech.started" and twilio_ready.is_set():
+                        await websocket.send_json({"event": "clear", "streamSid": stream_sid})
 
-        await _run_pair(from_twilio, from_provider)
+            await _run_pair(from_twilio, from_provider)
+
+    await _run_resumable(coordinator, connect_once)
+    if not client_active:
+        return
 
 
 async def close_after_bridge(websocket: WebSocket, bridge: Awaitable[None]) -> None:
     """Map upstream failures to a generic WebSocket close without leaking credentials or response bodies."""
     try:
         await bridge
-    except (ConnectionClosed, WebSocketException, TimeoutError, OSError, json.JSONDecodeError):
+    except (*_UPSTREAM_ERRORS, json.JSONDecodeError, AssemblyAIResumeError):
         logger.exception("assemblyai_bridge_failed")
         try:
             await websocket.close(code=1011, reason="Voice service unavailable")
