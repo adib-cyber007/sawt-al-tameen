@@ -864,5 +864,9 @@ measurements remain pending. No ElevenLabs code path will be used if AssemblyAI 
   streamed **981 audio frames**, received the complete agent transcript event and ended with `reply.done`.
 - Post-fix regression validation passed **336 tests**, **5 scripted scenarios / 30 checks**, the AssemblyAI
   provisioning contract dry-run, generated OpenAPI check and all 12 knowledge-base consistency checks.
+- Hardened public deployment verification after an ngrok edge closed one HTTP connection without a response.
+  Safe `GET`/`HEAD` requests now retry up to three times; writes are never retried because they may already have
+  committed. All transport failures produce a normal check result and summary instead of an uncaught traceback.
+  Reproduction then passed **26/26** public checks, **338 tests**, and **5 scenarios / 30 checks**.
 - Twilio phone calling remains disabled because no `TWILIO_AUTH_TOKEN` or phone number is configured. No phone call
   was claimed or simulated as live acceptance.

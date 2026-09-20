@@ -8,11 +8,12 @@ pre-authorisation call from verification to the sign-off boundary, and verifies 
     export PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET=...    # to test the AssemblyAI webhook boundary
     uv run python scripts/verify_deployment.py --base-url https://your-backend.example
 
-The deployment must have the catalogue loaded (`python -m preauth.seed`). The case this creates is closed at the
-end, and everything it touches is synthetic.
+The deployment must have the catalogue loaded (`python -m preauth.seed`). Everything this creates is synthetic;
+the review case remains pending because deployment verification must not bypass transcript-before-sign-off.
 """
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -35,6 +36,13 @@ REVIEWER = {"X-Actor-Type": "HUMAN_REVIEWER", "X-Actor-Id": "verify-reviewer", "
 
 passed: list[str] = []
 failed: list[str] = []
+_TRANSIENT_TRANSPORT_ERRORS = (
+    urllib.error.URLError,
+    http.client.RemoteDisconnected,
+    ConnectionResetError,
+    TimeoutError,
+    OSError,
+)
 
 
 def check(name: str, ok: bool, detail: str = "") -> bool:
@@ -43,6 +51,14 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
         detail = ""
     print(f"  {'PASS' if ok else 'FAIL'}  {name}{f' — {detail}' if detail else ''}")
     return ok
+
+
+def summary() -> int:
+    print(f"\n{len(passed)} passed, {len(failed)} failed")
+    if failed:
+        print("Failed: " + ", ".join(failed))
+        return 1
+    return 0
 
 
 class Client:
@@ -60,18 +76,26 @@ class Client:
             self.base + path, data=data, method=method,
             headers={"content-type": "application/json", **(headers or {})},
         )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                payload = resp.read()
-                return resp.status, json.loads(payload) if payload else None
-        except urllib.error.HTTPError as e:
-            payload = e.read()
+        # A free tunnel can occasionally drop a connection while rotating its edge. Safe reads are retried;
+        # writes are not, because the backend may have committed before the response was lost.
+        attempts = 3 if method in {"GET", "HEAD"} else 1
+        for attempt in range(attempts):
             try:
-                return e.code, json.loads(payload)
-            except ValueError:
-                return e.code, payload.decode(errors="replace")
-        except urllib.error.URLError as e:
-            return 0, str(e)
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    payload = resp.read()
+                    return resp.status, json.loads(payload) if payload else None
+            except urllib.error.HTTPError as e:
+                payload = e.read()
+                try:
+                    return e.code, json.loads(payload)
+                except ValueError:
+                    return e.code, payload.decode(errors="replace")
+            except _TRANSIENT_TRANSPORT_ERRORS as exc:
+                if attempt + 1 < attempts:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                return 0, f"{type(exc).__name__}: {exc}"
+        raise AssertionError("unreachable")
 
     def tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         status, body = self.request("POST", f"/api/v1/voice/tools/{name}", arguments, self.voice_headers)
@@ -104,7 +128,7 @@ def main() -> int:
     status, body = client.request("GET", "/health")
     if not check("health endpoint responds", status == 200 and body == {"status": "ok"}, str(body)[:80]):
         print("\nBackend not reachable; nothing else can be checked.")
-        return 1
+        return summary()
     status, _ = client.request("POST", "/api/v1/voice/tools/verify_caller", {}, {"Authorization": "Bearer wrong"})
     check("voice tools reject a wrong token", status == 401, f"got HTTP {status}")
     if gateway_secret:
@@ -125,7 +149,7 @@ def main() -> int:
     if not verification.get("ok"):
         check("caller verified", False, str((verification.get("error") or {}).get("code")))
         print("\nThe deployment has no catalogue loaded. Run: python -m preauth.seed")
-        return 1
+        return summary()
     result = verification["result"]
     check(
         "active member verified with tier and dependants",
@@ -328,9 +352,7 @@ def main() -> int:
             f"got HTTP {status}",
         )
 
-    print(f"\n{len(passed)} passed, {len(failed)} failed")
-    if failed:
-        print("Failed: " + ", ".join(failed))
+    if summary():
         return 1
     print(
         f"Deployment looks good. Verification case {case_reference} remains pending until a real completed "
