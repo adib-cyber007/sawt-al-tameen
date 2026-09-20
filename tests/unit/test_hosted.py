@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +42,63 @@ def test_provider_setup_dispatches_only_to_assemblyai(monkeypatch):
 
     assert hosted.setup_provider({"VOICE_PROVIDER": "assemblyai"}) == {"browser": "b", "phone": "p"}
     assert calls == ["assemblyai"]
+
+
+def test_windows_child_shutdown_does_not_require_posix_process_groups(monkeypatch):
+    hosted = _module()
+    calls = []
+
+    class FakeProcess:
+        pid = 42
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            calls.append("terminate")
+
+        def wait(self, timeout):
+            calls.append(("wait", timeout))
+
+        def kill(self):
+            calls.append("kill")
+
+    monkeypatch.setattr(hosted, "_IS_WINDOWS", True)
+    monkeypatch.setattr(
+        hosted.os,
+        "killpg",
+        lambda *_: (_ for _ in ()).throw(AssertionError("POSIX process groups are unavailable on Windows")),
+        raising=False,
+    )
+
+    hosted._stop_process(FakeProcess())
+
+    assert calls == ["terminate", ("wait", 10)]
+
+
+def test_windows_child_shutdown_forces_kill_after_timeout(monkeypatch):
+    hosted = _module()
+    calls = []
+
+    class FakeProcess:
+        pid = 42
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            calls.append("terminate")
+
+        def wait(self, timeout):
+            raise subprocess.TimeoutExpired("child", timeout)
+
+        def kill(self):
+            calls.append("kill")
+
+    monkeypatch.setattr(hosted, "_IS_WINDOWS", True)
+    hosted._stop_process(FakeProcess())
+
+    assert calls == ["terminate", "kill"]
 
 
 def test_assemblyai_preflight_generates_independent_secrets_and_loads_agent_ids(tmp_path, monkeypatch):

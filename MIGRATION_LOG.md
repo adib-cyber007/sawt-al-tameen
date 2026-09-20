@@ -717,7 +717,7 @@ and removed. They are audit evidence, not current product behavior.
   backend when needed, verifies Twilio signature enforcement and prints the application-hosted `/voice` URL.
 - Updated deployment verification for the AssemblyAI signed-webhook boundary. It deliberately does not fabricate
   a provider session: authoritative transcript retrieval requires a real AssemblyAI session and remains a live
-  acceptance gate. The verifier cleans up its synthetic case without bypassing sign-off.
+  acceptance gate. Its synthetic case remains pending because the verifier cannot bypass transcript-before-sign-off.
 - Added deterministic hosted-launcher tests for provider dispatch, secret separation, saved-agent-id loading and
   tunnel-credential removal from the backend environment.
 - Updated README, architecture, local/hosted deployment and voice-agent operations documentation to make
@@ -846,3 +846,23 @@ The API key alone is insufficient to create or exercise live stored agents. Set 
 `PREAUTH_ASSEMBLYAI_VOICE_ID` and a stable `PREAUTH_PUBLIC_BASE_URL`; Twilio calling additionally needs
 `TWILIO_AUTH_TOKEN` and `TWILIO_PHONE_NUMBER`. Until then, real voice quality, latency, interruption and phone-call
 measurements remain pending. No ElevenLabs code path will be used if AssemblyAI is unavailable.
+
+## Live hosted bring-up — 2026-09-20
+
+- Selected AssemblyAI's documented `ivy` voice for the professional insurer intake persona and stored it as the
+  default in `.env.example`; the private `.env` was updated without exposing any credential.
+- Installed the official ngrok Windows package and updated its agent from the package catalogue's 3.3.1 build to
+  3.39.11 so the current `--url` endpoint syntax is available.
+- Fixed two Windows launcher defects discovered during real startup: POSIX-only `os.killpg` shutdown and wildcard
+  expansion of Uvicorn's forwarded-IP value. Child shutdown is now platform-aware and the Uvicorn option is a
+  single non-globbable argument. Removed the redundant ngrok claim-probe that raced the real static endpoint.
+- Corrected deployment verification to treat refusal to close a pending-review voice case as the expected safety
+  result. The domain state machine and transcript-before-sign-off rule were not changed.
+- Created separate AssemblyAI browser and 8 kHz PCMU phone agents plus their signed completed-session webhook
+  subscriptions. The public ngrok deployment passed **26/26 checks** both before and after applying agent ids.
+- A real public browser WebSocket smoke test opened the stored agent, received an authoritative session id,
+  streamed **981 audio frames**, received the complete agent transcript event and ended with `reply.done`.
+- Post-fix regression validation passed **336 tests**, **5 scripted scenarios / 30 checks**, the AssemblyAI
+  provisioning contract dry-run, generated OpenAPI check and all 12 knowledge-base consistency checks.
+- Twilio phone calling remains disabled because no `TWILIO_AUTH_TOKEN` or phone number is configured. No phone call
+  was claimed or simulated as live acceptance.

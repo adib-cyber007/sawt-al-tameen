@@ -300,29 +300,42 @@ def main() -> int:
             status == 400 and (body.get("error") or {}).get("code") == "WEBHOOK_PAYLOAD_INVALID",
             f"got HTTP {status}",
         )
-        status, _ = client.staff(
+        status, body = client.staff(
             "POST",
             f"/api/v1/cases/{case_id}/closure",
             {"reason": "WITHDRAWN_BY_PROVIDER", "note": "Deployment verification cleanup."},
             actor={"X-Actor-Type": "SYSTEM", "X-Actor-Id": "verify-script"},
         )
-        check("verification case cleaned up without bypassing sign-off", status == 200, f"got HTTP {status}")
+        retained = status == 409 and (body.get("error") or {}).get("code") == "INVALID_STATE_TRANSITION"
+        check(
+            "verification case retained rather than bypassing sign-off",
+            retained,
+            f"got HTTP {status}",
+        )
     else:
         print("  SKIP  post-call webhook (PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET not set)")
         print("        Reviewers stay blocked on voice cases until the webhook is configured.")
-        status, _ = client.staff(
+        status, body = client.staff(
             "POST",
             f"/api/v1/cases/{case_id}/closure",
             {"reason": "WITHDRAWN_BY_PROVIDER", "note": "Deployment verification cleanup."},
             actor={"X-Actor-Type": "SYSTEM", "X-Actor-Id": "verify-script"},
         )
-        check("verification case cleaned up without bypassing sign-off", status == 200, f"got HTTP {status}")
+        retained = status == 409 and (body.get("error") or {}).get("code") == "INVALID_STATE_TRANSITION"
+        check(
+            "verification case retained rather than bypassing sign-off",
+            retained,
+            f"got HTTP {status}",
+        )
 
     print(f"\n{len(passed)} passed, {len(failed)} failed")
     if failed:
         print("Failed: " + ", ".join(failed))
         return 1
-    print(f"Deployment looks good. Verification case {case_reference} was cleaned up.")
+    print(
+        f"Deployment looks good. Verification case {case_reference} remains pending until a real completed "
+        "voice session is ingested."
+    )
     return 0
 
 

@@ -34,7 +34,7 @@ in git-ignored `.hosted/secrets.env`. A rerun updates existing agents/subscripti
 |---|---:|---|
 | `VOICE_PROVIDER=assemblyai` | No | Selects the migrated hosted provider |
 | `ASSEMBLYAI_API_KEY` | Yes | Voice Agent REST/WebSocket, Sessions and LLM Gateway |
-| `PREAUTH_ASSEMBLYAI_VOICE_ID` | No | Selected English voice |
+| `PREAUTH_ASSEMBLYAI_VOICE_ID` | No | English voice; defaults to `ivy` (professional and deliberate) in `.env.example` |
 | `PREAUTH_PUBLIC_BASE_URL` | No | Stable HTTPS URL (derived from ngrok domain when ngrok is selected) |
 | `PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET` | Yes | Generated HMAC secret for completed-session deliveries |
 | `PREAUTH_ASSEMBLYAI_MEDIA_SECRET` | Yes | Generated signing key for short-lived Twilio media URLs |

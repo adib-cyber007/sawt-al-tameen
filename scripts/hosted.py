@@ -45,6 +45,7 @@ ASSEMBLYAI_WEBHOOK_PATH = "/api/v1/voice/assemblyai/post-call"
 TWILIO_INBOUND_PATH = "/api/v1/voice/twilio/inbound"
 _PLACEHOLDER = re.compile(r"^(|<.*>|your[-_ ].*|changeme|x+|\.\.\.)$", re.IGNORECASE)
 _E164 = re.compile(r"^\+[1-9][0-9]{7,14}$")
+_IS_WINDOWS = os.name == "nt"
 
 
 class Stop(Exception):
@@ -124,6 +125,23 @@ def load_assemblyai_state() -> dict[str, Any]:
 # --------------------------------------------------------------------------- processes
 
 
+def _stop_process(process: subprocess.Popen) -> None:
+    """Stop one child process without assuming POSIX process-group APIs exist."""
+    if process.poll() is not None:
+        return
+    if _IS_WINDOWS:
+        process.terminate()
+    else:
+        os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        if _IS_WINDOWS:
+            process.kill()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+
+
 class Processes:
     def __init__(self) -> None:
         self.children: dict[str, subprocess.Popen] = {}
@@ -139,12 +157,8 @@ class Processes:
 
     def stop(self, name: str) -> None:
         process = self.children.pop(name, None)
-        if process and process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+        if process:
+            _stop_process(process)
 
     def stop_all(self) -> None:
         for name in list(self.children):
@@ -265,72 +279,6 @@ def _ngrok_error(line: str) -> str | None:
     return None
 
 
-NGROK_HINTS = {
-    "ERR_NGROK_105": "the authtoken is not valid — copy it again from https://dashboard.ngrok.com/get-started/your-authtoken",
-    "ERR_NGROK_107": "the authtoken was reset or revoked — copy the current one from the ngrok dashboard",
-    "ERR_NGROK_108": "another ngrok agent is already running on this account (the free plan allows one); stop it",
-    "ERR_NGROK_4018": "the authtoken is missing or not valid",
-}
-
-
-def probe_ngrok(config: dict[str, str]) -> None:
-    """Connect to ngrok with the real token and domain, then disconnect — all before anything is started.
-
-    A bad authtoken or a domain that is not reserved on this account is reported here, not after the backend
-    is already running. The probe forwards to a port nothing listens on and is stopped as soon as it has either
-    registered the domain or been refused. Success is read from the agent's local API (/api/tunnels), whose shape
-    is stable across ngrok releases, rather than from log wording, which is not.
-    """
-    import queue
-    import threading
-
-    domain = config["PREAUTH_PUBLIC_BASE_URL"]
-    env = {**os.environ, "NGROK_AUTHTOKEN": config["NGROK_AUTHTOKEN"]}  # never on the command line
-    probe = subprocess.Popen(
-        ["ngrok", "http", "1", "--url", domain, "--log", "stdout", "--log-format", "json"],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True,
-    )
-    lines: "queue.Queue[str]" = queue.Queue()
-    threading.Thread(target=lambda: [lines.put(l) for l in probe.stdout], daemon=True).start()
-
-    seen, error, started, web = [], None, False, None
-    deadline = time.time() + 25
-    try:
-        while time.time() < deadline and not (error or started):
-            try:
-                line = lines.get(timeout=0.5)
-                seen.append(line.rstrip())
-                error = _ngrok_error(line)
-                record = json.loads(line) if line.startswith("{") else {}
-                if record.get("msg") == "starting web service" and record.get("addr"):
-                    web = record["addr"]
-                if f'"url":"{domain}"' in line:
-                    started = True
-            except queue.Empty:
-                pass
-            if web and not error:
-                status, body = http_status(f"http://{web}/api/tunnels", timeout=2)
-                if status == 200 and domain in body:
-                    started = True
-            if probe.poll() is not None and lines.empty():
-                break
-    finally:
-        if probe.poll() is None:
-            os.killpg(probe.pid, signal.SIGTERM)
-            probe.wait(timeout=10)
-    if error:
-        code = next((c for c in NGROK_HINTS if c in error), None)
-        hint = NGROK_HINTS.get(code) or (
-            f"check that {domain.removeprefix('https://')} is reserved on THIS ngrok account at "
-            "https://dashboard.ngrok.com/domains"
-        )
-        raise Stop(f"ngrok refused the tunnel: {hint}.\n          ngrok said: " + _redact(error.strip(), config))
-    if not started:
-        tail = "\n".join("          | " + _redact(l, config) for l in seen[-5:])
-        raise Stop(f"ngrok did not register {domain} within 25 s. Check the network.\n{tail}")
-    ok(f"ngrok accepted the authtoken and {domain.removeprefix('https://')}")
-
-
 def preflight(config: dict[str, str], args: argparse.Namespace) -> None:
     step("0", "Checking .env")
     if not ENV_FILE.exists():
@@ -381,8 +329,6 @@ def preflight(config: dict[str, str], args: argparse.Namespace) -> None:
     except AssemblyAIError as exc:
         raise Stop(f"AssemblyAI rejected or could not verify ASSEMBLYAI_API_KEY: {exc}") from None
     ok("AssemblyAI accepted the API key")
-    if provider == "ngrok":
-        probe_ngrok(config)
 
     for name in ("PREAUTH_VOICE_TOOL_TOKEN", "PREAUTH_GATEWAY_SECRET"):
         if not is_set(config, name):
@@ -423,7 +369,7 @@ def start_backend(config: dict[str, str], processes: Processes) -> None:
     processes.start(
         "backend",
         [sys.executable, "-m", "uvicorn", "preauth.main:app", "--host", "127.0.0.1", "--port", port,
-         "--proxy-headers", "--forwarded-allow-ips", "*"],
+         "--proxy-headers", "--forwarded-allow-ips=*"],
         env,
     )
     for _ in range(60):
