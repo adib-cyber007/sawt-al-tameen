@@ -153,9 +153,13 @@ provider, then run one command:
 ./scripts/run_hosted.sh
 ```
 
+On Windows, `powershell -File scripts/start_hosted.ps1` starts the same hosted service in the background and
+checks the static URL before returning. The computer must stay awake; see [hosted deployment](docs/DEPLOYMENT.md#ngrok-static-domain).
+
 It starts the backend and a stable HTTPS tunnel, runs deployment checks, creates or updates separate 24 kHz browser
 and 8 kHz PCMU phone agents, registers signed completed-session webhooks, and prints the `/voice` test page. A
-second run updates the same resources. AssemblyAI is the sole hosted voice provider.
+second run updates the same resources. Browser capture is resampled from the device rate to 24 kHz for consistent
+Chrome, Firefox and Safari recognition. AssemblyAI is the sole hosted voice provider.
 
 Guides: [local mode](docs/LOCAL_MODE.md) · [hosted deployment](docs/DEPLOYMENT.md#one-command-hosted-mode)
 
@@ -183,11 +187,12 @@ and it never accepts an unsigned request. Details: [DEPLOYMENT.md](docs/DEPLOYME
 
 ```bash
 uv run pytest                                             # SQLite
+node --test tests/voice_audio.test.mjs                     # audio conversion and call cleanup (Node 24)
 docker compose up -d --wait                               # PostgreSQL
 PREAUTH_TEST_DATABASE_URL=postgres://preauth:preauth@localhost:55432/preauth uv run pytest
 ```
 
-**349 tests** pass in the current SQLite run; CI runs the same suite against SQLite and PostgreSQL. They build the
+**342 Python tests** and **7 JavaScript audio tests** pass locally; CI runs the Python suite against SQLite and PostgreSQL. They build the
 schema through the real Alembic migration, so the migration itself is tested. Among other things, they pin down that:
 - all three lapsed members are rejected;
 - all eleven ambiguous procedures escalate, citing their own rule;
@@ -200,9 +205,10 @@ No test needs a model download or a network connection.
 
 | Command | What it proves |
 |---|---|
-| `scripts/verify_deployment.py` | A live deployment behaves correctly end to end (28 checks) |
+| `scripts/verify_deployment.py` | A live deployment behaves correctly end to end (26 checks) |
 | `scripts/simulate_conversations.py` | Five call shapes, including a caller demanding a decision (30 checks) |
 | `scripts/generate_uae_knowledge_base.py --check` | The catalogue is internally consistent |
+| `scripts/voice_audio_smoke.mjs` | A 24 kHz PCM WAV is transcribed and receives agent text plus audio over the live browser WebSocket |
 | `scripts/check_local.sh` | What local mode still needs on this machine |
 
 After changing routes, schemas or the catalogue, regenerate the derived files:

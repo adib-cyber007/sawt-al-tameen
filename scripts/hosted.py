@@ -18,6 +18,7 @@ never read by local mode.
 """
 
 import argparse
+import ctypes
 import json
 import os
 import re
@@ -46,6 +47,46 @@ TWILIO_INBOUND_PATH = "/api/v1/voice/twilio/inbound"
 _PLACEHOLDER = re.compile(r"^(|<.*>|your[-_ ].*|changeme|x+|\.\.\.)$", re.IGNORECASE)
 _E164 = re.compile(r"^\+[1-9][0-9]{7,14}$")
 _IS_WINDOWS = os.name == "nt"
+_ES_CONTINUOUS = 0x80000000
+_ES_SYSTEM_REQUIRED = 0x00000001
+
+
+class _SystemPowerStatus(ctypes.Structure):
+    _fields_ = [
+        ("ACLineStatus", ctypes.c_ubyte),
+        ("BatteryFlag", ctypes.c_ubyte),
+        ("BatteryLifePercent", ctypes.c_ubyte),
+        ("SystemStatusFlag", ctypes.c_ubyte),
+        ("BatteryLifeTime", ctypes.c_ulong),
+        ("BatteryFullLifeTime", ctypes.c_ulong),
+    ]
+
+
+def _on_ac_power() -> bool:
+    if not _IS_WINDOWS:
+        return False
+    status = _SystemPowerStatus()
+    return bool(ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(status))) and status.ACLineStatus == 1
+
+
+def _set_execution_state(flags: int) -> bool:
+    return bool(ctypes.windll.kernel32.SetThreadExecutionState(flags))
+
+
+def maintain_awake_on_ac(active: bool) -> bool:
+    """Keep this launcher awake on AC; preserve normal battery and user-requested sleep behavior."""
+    if not _IS_WINDOWS:
+        return False
+    desired = _on_ac_power()
+    if desired == active:
+        return active
+    flags = _ES_CONTINUOUS | (_ES_SYSTEM_REQUIRED if desired else 0)
+    if not _set_execution_state(flags):
+        warn("Windows could not update the hosted service sleep request")
+        return active
+    info("automatic sleep inhibited while hosted service runs on AC" if desired else
+         "normal sleep behavior restored on battery")
+    return desired
 
 
 class Stop(Exception):
@@ -177,7 +218,8 @@ def log_tail(name: str, lines: int = 15) -> str:
 
 def http_status(url: str, timeout: float = 5) -> tuple[int | None, str]:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        request = urllib.request.Request(url, headers={"ngrok-skip-browser-warning": "true"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, response.read(200).decode(errors="replace")
     except urllib.error.HTTPError as e:
         return e.code, ""
@@ -391,12 +433,7 @@ def start_tunnel(config: dict[str, str], processes: Processes) -> None:
 
 def start_ngrok_tunnel(config: dict[str, str], processes: Processes) -> None:
     public = config["PREAUTH_PUBLIC_BASE_URL"]
-    env = {**os.environ, "NGROK_AUTHTOKEN": config["NGROK_AUTHTOKEN"]}  # via env, never on the command line
-    processes.start(
-        "tunnel",
-        ["ngrok", "http", config["PREAUTH_HOSTED_PORT"], "--url", public, "--log", "stdout", "--log-format", "json"],
-        env,
-    )
+    launch_ngrok_tunnel(config, processes)
     info(f"waiting for {public} to answer (up to 60 s)")
     last = None
     for _ in range(30):
@@ -414,6 +451,35 @@ def start_ngrok_tunnel(config: dict[str, str], processes: Processes) -> None:
         time.sleep(2)
     raise Stop(f"{public}/health never answered through ngrok (last: HTTP {last}).\n"
                + _redact(log_tail("tunnel"), config))
+
+
+def launch_ngrok_tunnel(config: dict[str, str], processes: Processes) -> None:
+    """Launch the reserved endpoint with an explicit HTTP upstream and loopback address."""
+    env = {**os.environ, "NGROK_AUTHTOKEN": config["NGROK_AUTHTOKEN"]}  # via env, never on the command line
+    processes.start(
+        "tunnel",
+        ["ngrok", "http", f"http://127.0.0.1:{config['PREAUTH_HOSTED_PORT']}",
+         "--url", config["PREAUTH_PUBLIC_BASE_URL"], "--log", "stdout", "--log-format", "json"],
+        env,
+    )
+
+
+def check_ngrok_health(config: dict[str, str], processes: Processes, failures: int) -> int:
+    """Heal a persistent public-route failure without restarting the backend or changing the URL."""
+    status, body = http_status(f"{config['PREAUTH_PUBLIC_BASE_URL']}/health", timeout=5)
+    if status == 200 and '"ok"' in body:
+        return 0
+    failures += 1
+    if failures < 3:
+        return failures
+    local_status, _ = http_status(f"http://127.0.0.1:{config['PREAUTH_HOSTED_PORT']}/health", timeout=3)
+    if local_status != 200:
+        warn("public health failed and the local backend is unhealthy; see .hosted/backend.log")
+        return 0
+    warn(f"public health failed three times (last HTTP {status}); restarting the ngrok tunnel")
+    processes.stop("tunnel")
+    launch_ngrok_tunnel(config, processes)
+    return 0
 
 
 def start_cloudflare_tunnel(config: dict[str, str], processes: Processes) -> None:
@@ -548,6 +614,10 @@ def _post_status(url: str) -> tuple[int | None, str]:
 
 
 def main() -> int:
+    # Windows redirected consoles may use cp1252; status text must never stop a healthy service.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--no-tunnel", action="store_true",
@@ -557,6 +627,7 @@ def main() -> int:
 
     config = load_config()
     processes = Processes()
+    power_request_active = False
     # Fresh logs per run: the tunnel check reads its log, and yesterday's errors must not fail today's run.
     for name in ("backend", "tunnel"):
         (HOSTED_DIR / f"{name}.log").unlink(missing_ok=True)
@@ -619,10 +690,17 @@ def main() -> int:
         print("  transcript, identifier accuracy, first-audio latency and barge-in behavior (docs/VOICE_AGENT.md).")
         print("\n  Running. Press Ctrl+C to stop the backend and the tunnel.", flush=True)
 
+        next_tunnel_probe = time.monotonic() + 15
+        tunnel_failures = 0
+        power_request_active = maintain_awake_on_ac(power_request_active)
         while True:
             gone = processes.exited()
             if gone:
                 raise Stop(f"The {gone} process exited unexpectedly.\n{log_tail(gone)}")
+            if config["_TUNNEL"] == "ngrok" and time.monotonic() >= next_tunnel_probe:
+                tunnel_failures = check_ngrok_health(config, processes, tunnel_failures)
+                power_request_active = maintain_awake_on_ac(power_request_active)
+                next_tunnel_probe = time.monotonic() + 15
             time.sleep(1)
     except Stop as e:
         banner("STOPPED", "red")
@@ -632,6 +710,8 @@ def main() -> int:
         print("\nStopping.")
         return 0
     finally:
+        if power_request_active:
+            _set_execution_state(_ES_CONTINUOUS)
         # A second Ctrl+C (or a forwarded SIGTERM) must not interrupt the cleanup and leave a process behind.
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)

@@ -157,9 +157,15 @@ def test_assemblyai_browser_console_is_served_without_exposing_the_api_key(servi
     with TestClient(create_app(services, settings)) as client:
         page = client.get("/voice")
         script = client.get("/voice/assets/app.js")
+        worklet = client.get("/voice/assets/pcm-capture.js")
     assert page.status_code == 200 and "Pre-authorisation voice assistant" in page.text
+    assert page.headers["cache-control"] == "no-store"
     assert script.status_code == 200 and "input.audio" in script.text
-    assert "must-not-be-in-html" not in page.text + script.text
+    assert 'new AudioContext({ latencyHint: "playback" })' in script.text
+    assert "targetSampleRate: 24000" in script.text
+    assert "noiseSuppression: true" in script.text
+    assert worklet.status_code == 200 and "this.ratio" in worklet.text
+    assert "must-not-be-in-html" not in page.text + script.text + worklet.text
 
 
 def test_assemblyai_twilio_socket_rejects_an_invalid_media_token_before_upstream_connect(services):

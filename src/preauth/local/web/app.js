@@ -18,8 +18,14 @@ const ui = {
 
 let conversationId = null;
 let recorder = null;
-let chunks = [];
 let busy = false;
+let microphoneStarting = false;
+
+// The local console also uses the loudspeaker. Never play a reply into an
+// active recording, including when the native audio controls are used.
+ui.player.addEventListener("play", () => {
+  if (microphoneStarting || recorder?.state === "recording") ui.player.pause();
+});
 
 /* ------------------------------------------------------------------ transport */
 
@@ -203,23 +209,58 @@ ui.composer.addEventListener("submit", async (event) => {
 });
 
 ui.mic.addEventListener("click", async () => {
+  if (microphoneStarting || !conversationId) return;
   if (recorder && recorder.state === "recording") {
+    ui.mic.disabled = true;
     recorder.stop();
     return;
   }
+  if (busy) return;
+  microphoneStarting = true;
+  const recordingConversation = conversationId;
+  let stream;
+  let currentRecorder;
+  const releaseMicrophone = () => {
+    if (currentRecorder) {
+      currentRecorder.onstop = currentRecorder.ondataavailable = currentRecorder.onerror = null;
+      if (currentRecorder.state === "recording") currentRecorder.stop();
+    }
+    stream?.getTracks().forEach((track) => track.stop());
+    if (recorder === currentRecorder) recorder = null;
+    ui.mic.classList.remove("recording");
+    ui.mic.textContent = "🎙 Record";
+  };
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream);
-    chunks = [];
-    recorder.ondataavailable = (event) => chunks.push(event.data);
-    recorder.onstop = async () => {
-      stream.getTracks().forEach((track) => track.stop());
-      ui.mic.classList.remove("recording");
-      ui.mic.textContent = "🎙 Record";
-      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+    if (globalThis.isSecureContext === false) throw new Error("Open the HTTPS site address to use the microphone on your PC or phone.");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      throw new Error("This browser cannot record audio. Please update your browser.");
+    }
+    ui.player.pause();
+    setBusy(true, "preparing microphone…");
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    currentRecorder = recorder = new MediaRecorder(stream);
+    const recordingChunks = [];
+    currentRecorder.ondataavailable = (event) => {
+      if (event.data.size) recordingChunks.push(event.data);
+    };
+    currentRecorder.onerror = () => {
+      releaseMicrophone();
+      setBusy(false, "Recording was interrupted. Please record your message again.");
+    };
+    currentRecorder.onstop = async () => {
+      const mediaType = currentRecorder.mimeType || recordingChunks[0]?.type || "audio/webm";
+      releaseMicrophone();
+      const blob = new Blob(recordingChunks, { type: mediaType });
+      if (!blob.size) {
+        setBusy(false, "No audio was recorded. Please try again.");
+        return;
+      }
       setBusy(true, "transcribing…");
       try {
-        const payload = await call(`/conversations/${conversationId}/audio`,
+        const payload = await call(`/conversations/${recordingConversation}/audio`,
           { method: "POST", body: blob, type: blob.type });
         setBusy(false);
         handle(payload);
@@ -229,11 +270,21 @@ ui.mic.addEventListener("click", async () => {
       }
     };
     recorder.start();
+    ui.mic.disabled = false;
     ui.mic.classList.add("recording");
     ui.mic.textContent = "■ Stop";
     setStatus("recording…");
-  } catch {
-    setStatus("No microphone is available in this browser.", true);
+  } catch (error) {
+    releaseMicrophone();
+    setBusy(false);
+    const message = error?.name === "NotAllowedError"
+      ? "Microphone permission was denied. Allow access in your browser and device privacy settings, then try again."
+      : error?.name === "NotReadableError"
+        ? "The microphone could not be opened. Check whether another app is using it, then try again."
+        : error?.message || "No microphone is available in this browser.";
+    setStatus(message, true);
+  } finally {
+    microphoneStarting = false;
   }
 });
 

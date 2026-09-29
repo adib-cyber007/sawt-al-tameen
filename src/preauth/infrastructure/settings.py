@@ -53,7 +53,6 @@ class Settings:
     assemblyai_browser_agent_id: str | None = None
     assemblyai_phone_agent_id: str | None = None
     assemblyai_voice_id: str | None = None
-    assemblyai_llm_model: str = "gemini-2.5-flash"
     assemblyai_api_base: str = "https://agents.assemblyai.com"
     assemblyai_ws_url: str = "wss://agents.assemblyai.com/v1/ws"
     # The https:// address Twilio is configured with; Twilio signs that URL, not the one behind the tunnel.
@@ -83,7 +82,6 @@ class Settings:
             assemblyai_browser_agent_id=_optional("PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID"),
             assemblyai_phone_agent_id=_optional("PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID"),
             assemblyai_voice_id=_optional("PREAUTH_ASSEMBLYAI_VOICE_ID"),
-            assemblyai_llm_model=_optional("PREAUTH_ASSEMBLYAI_LLM_MODEL") or cls.assemblyai_llm_model,
             assemblyai_api_base=(
                 _optional("PREAUTH_ASSEMBLYAI_API_BASE") or cls.assemblyai_api_base
             ).rstrip("/"),

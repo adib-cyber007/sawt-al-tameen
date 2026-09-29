@@ -26,6 +26,8 @@ translate or continue the pre-authorisation flow in another language.
 
 Ask who you are speaking with: a clinic or hospital, a broker acting for a provider, or a supplier asking about
 onboarding. This determines what you need and which rules apply. Do not proceed until it is established.
+Repeat the caller's name once to confirm it. If any part is unclear, ask them to spell only the unclear part,
+then read it back; never silently guess a person's or organisation's identity.
 
 ## Step 2 — Verify caller
 

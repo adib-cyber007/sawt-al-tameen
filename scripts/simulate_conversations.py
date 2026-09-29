@@ -11,7 +11,7 @@ exercise the model's own behaviour.
     uv run python scripts/simulate_conversations.py --quiet    # assertions only
 """
 
-import sys
+import argparse
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -336,6 +336,9 @@ def _migrate(database_url: str) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Run scripted voice-agent tool and business-rule scenarios.")
+    parser.add_argument("--quiet", action="store_true", help="show only the check summary")
+    args = parser.parse_args()
     settings = Settings.from_env()
     _migrate(settings.database_url)
     engine = build_engine(settings.database_url)
@@ -349,7 +352,7 @@ def main() -> int:
     for scenario in (scenario_approval, scenario_denial, scenario_ambiguous, scenario_lapsed, scenario_pressure):
         scenario(services)
 
-    if "--quiet" not in sys.argv:
+    if not args.quiet:
         print("Simulated calls (scripted speech, real tool calls against the backend)\n")
         for title, lines in transcripts:
             print(title)

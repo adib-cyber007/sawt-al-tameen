@@ -870,3 +870,131 @@ measurements remain pending. No ElevenLabs code path will be used if AssemblyAI 
   Reproduction then passed **26/26** public checks, **338 tests**, and **5 scenarios / 30 checks**.
 - Twilio phone calling remains disabled because no `TWILIO_AUTH_TOKEN` or phone number is configured. No phone call
   was claimed or simulated as live acceptance.
+
+## Live voice incident and recognition hardening — 2026-09-20
+
+- Investigated browser sessions `sess_3e8ee36189bb46d9bc4e7ba693bc1fe7` and
+  `sess_a3c341198b1c42e5a7c6442518c075fa`. Both played the configured greeting and produced final caller
+  transcripts, but every user-triggered turn had no agent text or audio. The first session eventually ended with
+  provider `server_error`; the second remained connected until the caller ended it.
+- Reproduced the reasoning-layer failure directly against AssemblyAI LLM Gateway: this account returned HTTP 400
+  because it did not have access to the configured `gemini-2.5-flash` model. The greeting bypasses the LLM, which
+  explains why it worked while every conversational response failed.
+- Removed the custom LLM Gateway override and now send `llm: []` on every stored-agent update. Per AssemblyAI's
+  current Voice Agent contract, this explicitly restores its managed conversational model and clears stale
+  custom-model configuration.
+- Added an English language constraint and a UAE health-insurance transcription prompt alongside the existing
+  exact keyterms. Enabled far-field Voice Focus for laptop/phone calling while retaining balanced transcription.
+- Reworked browser audio around the device's native `AudioContext` rate and continuous AudioWorklet resampling to
+  24 kHz. This preserves Firefox echo cancellation and prevents Safari from labelling 48 kHz samples as 24 kHz.
+  Browser noise suppression is disabled to avoid stacking it with AssemblyAI Voice Focus.
+- Runtime `server_error`, `agent_init_failed`, and `agent_timeout` events now enter the bounded same-session resume
+  path. Other provider errors close the browser visibly instead of leaving a silent live call; provider error
+  codes and session ids are logged without provider messages or credentials.
+- Updated both existing stored agents in place, then restarted the backend and ngrok tunnel with the corrected
+  runtime. Public deployment verification passed **26/26 checks**.
+- A repeatable real-audio smoke test streamed 24 kHz PCM through the public browser WebSocket. AssemblyAI
+  transcribed "My name is Mohammed Adeeb. I am calling from Al Noor Specialist Hospital." exactly, generated an
+  appropriate identity-confirmation response, and returned **1,278 audio chunks** in **32.1 seconds** including
+  the complete greeting and synthetic caller playback.
+- Final validation passed **340 tests**, **5 scripted scenarios / 30 checks**, the 12-file knowledge-base check,
+  generated API-document check, JavaScript syntax checks, and `git diff --check`.
+
+## 2026-09-21 — Reliability review and audio efficiency
+
+- Preserved the three voice tools, verification sequence, rules, human-review boundary, and business workflow.
+- Fixed browser call teardown: detach old socket callbacks before asynchronous audio cleanup, close the socket
+  on hangup, release microphone/capture references, and restore controls even if AudioContext.close fails.
+  Abnormal WebSocket closure now shows an interruption message. Completed playback sources are disconnected.
+- Fixed backend bridge cancellation to cancel and drain both forwarding tasks even when the enclosing request
+  is cancelled. Regression tests cover request cancellation and one forwarding task failing.
+- Replaced growing/spliced PCM arrays with fixed-size 1,200-sample transfer buffers, retaining 24 kHz PCM16
+  output and 50 ms packets. Preserved resampler phase across input blocks. No end-to-end latency improvement
+  is claimed without measurement.
+- Added dependency-free Node tests for exact resampling at 16, 24, 44.1, 48, and 96 kHz and browser call cleanup;
+  wired them into CI and documented the command.
+- Live startup exposed a Windows cp1252 UnicodeEncodeError while printing Twilio instructions. Console streams
+  now escape unsupported characters, so a logging message cannot shut down the healthy backend and tunnel.
+- Validation: 342 Python tests passed (five existing SQLite datetime deprecation warnings); seven Node tests
+  passed; five scenarios / 30 checks passed; knowledge-base and generated API-document checks passed.
+  The launcher tests passed again after its fix. Public deployment verification passed 26/26 checks.
+- A real public WebSocket session reached session.ready and returned 424,320 bytes of greeting audio.
+  This run did not repeat caller-audio recognition or a long multi-turn microphone call. Twilio remains
+  unconfigured; PostgreSQL/Docker and cross-browser hardware acceptance were not run locally.
+- Left the updated backend and ngrok running for browser testing. Existing in-progress migration edits were
+  preserved; no commit or PR was created during this review.
+
+## 2026-09-23 — Static ngrok URL availability
+
+- The configured static hostname remained valid, but both the local backend and ngrok process had stopped. The
+  public URL therefore could not reach the application. Starting the existing hosted launcher restored the same
+  hostname and passed all 26 public deployment checks.
+- Added `scripts/start_hosted.ps1` for Windows background startup. It checks the public health response, avoids
+  a duplicate launch when already live, refuses to start over an occupied backend port, and writes launcher logs
+  under `.hosted/`. It does not register automatic startup after a reboot.
+- ngrok's free-domain browser warning returned HTTP 200 and HTML to Windows PowerShell. The new health probe sends
+  the documented `ngrok-skip-browser-warning` header and checks the JSON status, preventing a false success.
+- Verified public `/health` returned `{status: ok}` and `/voice` returned HTTP 200 with the app page. Confirmed
+  the background launcher stays running after the PowerShell invocation ends. Hosted launcher unit tests passed.
+  The hostname is stable, but the computer and its backend/tunnel processes must remain running for access.
+
+## 2026-09-23 — Recurring ngrok gateway error
+
+- User reported `ERR_NGROK_3004` (invalid or incomplete upstream HTTP response). At the incident time the local
+  backend was healthy, while ngrok logged an aborted connection to its cloud gateway and a heartbeat timeout;
+  ngrok re-established its session one second later. The public health and voice page subsequently returned 200,
+  and a live voice WebSocket returned session.ready plus 424,320 bytes of greeting audio. The evidence points to
+  a transient tunnel connection loss, though the exact failed HTTP request was not present in ngrok inspection.
+- Set ngrok's upstream explicitly to `http://127.0.0.1:<PREAUTH_HOSTED_PORT>`, removing scheme and hostname
+  inference. Added a 15-second public health probe; after three consecutive failures with a healthy local backend,
+  the launcher restarts only ngrok and retains the static domain and running backend.
+- Unit tests cover the explicit HTTP command, token separation, and bounded persistent-failure recovery. The
+  managed stack was restarted with these changes; 26 public deployment checks passed and `/health` plus `/voice`
+  returned HTTP 200 through the same domain.
+- A Windows laptop and its internet link are still single points of failure. An always-on host with persistent
+  PostgreSQL is required to make the public service independent of this computer. The user chose to keep the
+  application on this PC with ngrok, so no cloud host was provisioned.
+- Registered the current-user `SawtAlTameenHosted` Windows sign-in task from
+  `scripts/install_hosted_autostart.ps1`. It runs the idempotent background starter and retries startup if the
+  network is temporarily unavailable. A manual task run returned result 0 without duplicating the running app.
+- Final live verification after restart: 26/26 public deployment checks; public `/health` returned `ok` and
+  `/voice` returned HTTP 200; AssemblyAI WebSocket reached `session.ready` and returned 470,880 bytes of spoken
+  greeting audio. The existing core business workflow and case rules were not changed.
+
+## 2026-09-23 — Offline endpoint caused by Windows sleep
+
+- User reported `ERR_NGROK_3200`. Backend and ngrok processes were still present, but ngrok logged repeated DNS
+  failures resolving `connect.ngrok-agent.com`. Windows System events show Modern Standby entered at 21:42:18
+  and exited at 22:42:25; `powercfg /a` identifies the available standby mode as **network disconnected**.
+  This explains the one-hour offline period. The existing 15-second public-health watcher restarted ngrok after
+  wake, and the same static domain returned `/health: ok` again.
+- The active power plan's idle sleep timers were five minutes on AC and twenty minutes on battery. The user chose
+  to prevent automatic sleep only while plugged in. The Windows hosted launcher now holds an
+  `ES_SYSTEM_REQUIRED | ES_CONTINUOUS` execution request on AC, releases it on battery or shutdown, and leaves
+  the power plan unchanged. It does not override a user-requested sleep, lid close, hibernation, or power-off.
+- Added an AC/battery transition unit test. All eight focused hosted-launcher tests passed, and the managed
+  service was restarted with the new code. Its public deployment verification and browser page succeeded.
+
+## 2026-09-27 — Voice jitter and tool-call latency review
+
+- Live greeting probes through localhost and the public ngrok route returned approximately 8.05 s and 9.64 s
+  of 24 kHz PCM respectively, delivered in 805 and 964 separate 10 ms packets. Session readiness took 1.74 s
+  locally and 1.67 s publicly; first greeting audio followed readiness by 231 ms and 218 ms. The largest observed
+  inter-packet gap was 41 ms locally and 181 ms publicly. These are single-session observations, not latency SLAs.
+- The browser previously created and scheduled one AudioBufferSourceNode per packet with only a 20 ms lead. That
+  could underflow on observed packet jitter and required hundreds of main-thread audio nodes per reply. Added a
+  continuous PCM playback AudioWorklet with sample-rate conversion, a 60 ms startup reserve, adaptive reserve
+  after an underrun, final-tail drain, and barge-in clearing. The microphone, AssemblyAI session, transcript,
+  business rules, and user-visible call flow were unchanged.
+- Tool calls previously blocked the provider receive loop while the backend business tool ran, potentially
+  delaying audio mid-reply. Tool execution now runs asynchronously but sequentially, and results still wait for
+  `reply.done`; interrupted replies still discard results. A regression test holds a tool call while asserting
+  that later audio events can be handled immediately and that business-tool order remains intact.
+- The scripted-scenario command unexpectedly ran and wrote five synthetic scenarios to the configured local
+  `preauth.db` when invoked with `--help`. The synthetic records were left intact rather than deleting possible
+  user data. Added normal argument parsing so `--help` exits without executing scenarios.
+- Validation: 346 Python tests and 11 browser-audio tests passed. The managed service was restarted with the
+  updated bridge and the same static ngrok URL; its deployment verification passed 26/26 checks. Local and public
+  health endpoints and the new playback asset returned HTTP 200. A fresh public WebSocket received `session.ready`
+  and 405,600 bytes of spoken greeting audio. A human microphone/headphone call, live caller
+  recognition, Twilio audio, and an objective before/after listening score remain unverified in this run.

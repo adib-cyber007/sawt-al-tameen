@@ -26,9 +26,7 @@ from preauth.infrastructure.assemblyai_client import AssemblyAIClient, AssemblyA
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_FILE = ROOT / ".assemblyai-state.json"
-DEFAULT_LLM_MODEL = "gemini-2.5-flash"
 DEFAULT_API_BASE = "https://agents.assemblyai.com"
-LLM_GATEWAY_BASE = "https://llm-gateway.assemblyai.com/v1"
 WEBHOOK_PATH = "/api/v1/voice/assemblyai/post-call"
 FIRST_MESSAGE = (
     "Sawt Assurance pre-authorisation line, this is an automated assistant. The call is recorded for audit. "
@@ -37,6 +35,12 @@ FIRST_MESSAGE = (
 KEYTERM_LIMIT = 100
 WEBHOOK_SECRET_MIN_LENGTH = 32
 WEBHOOK_SECRET_MAX_LENGTH = 256
+TRANSCRIPTION_PROMPT = (
+    "An English-language UAE health-insurance pre-authorisation business call. Callers state personal and "
+    "organisation names, clinic and hospital names, dates of birth, AED amounts, ICD-10 codes, provider "
+    "identifiers such as PRV-30011, policy identifiers such as POL-SA-2026-000001, procedure identifiers such "
+    "as SP-20050, and onboarding references such as ONB-APP-2026-0007."
+)
 
 
 def _catalogue(name: str) -> dict[str, Any]:
@@ -53,15 +57,16 @@ def keyterms() -> list[str]:
     ]
     for tier in _catalogue("policy_tiers.json")["tiers"]:
         terms += [tier["name"], tier["network"]["name"]]
+    providers = _catalogue("network_providers.json")["providers"]
+    terms += ["PRV", "POL-SA", "SP", "MBR", "ONB-APP", "PA", "CL"]
+    terms += [provider["provider_id"] for provider in providers]
+    terms += [provider["name"] for provider in providers]
     procedures = _catalogue("procedure_coverage.json")["procedures"]
     terms += [procedure["code"] for procedure in procedures]
     terms += [
         "arthroscopy", "meniscectomy", "cholecystectomy", "polysomnography", "rhinoplasty", "septoplasty",
         "sleeve gastrectomy", "angioplasty", "prostatectomy", "haemodialysis",
     ]
-    terms += [provider["provider_id"] for provider in _catalogue("network_providers.json")["providers"]]
-    terms += ["PRV", "POL-SA", "SP", "MBR", "ONB-APP", "PA", "CL"]
-    terms += [provider["name"] for provider in _catalogue("network_providers.json")["providers"]]
     return list(dict.fromkeys(terms))[:KEYTERM_LIMIT]
 
 
@@ -79,10 +84,9 @@ def agent_payload(
     *,
     name: str,
     voice_id: str,
-    llm_model: str,
-    api_key_for_gateway: str,
     encoding: str,
     sample_rate: int,
+    interrupt_response: bool,
 ) -> dict[str, Any]:
     return {
         "name": name,
@@ -93,7 +97,12 @@ def agent_payload(
             "type": "audio",
             "format": {"encoding": encoding, "sample_rate": sample_rate},
             "keyterms": keyterms(),
-            "turn_detection": {"interrupt_response": True},
+            "transcription_mode": "balanced",
+            "transcription_prompt": TRANSCRIPTION_PROMPT,
+            "language_codes": ["en"],
+            "voice_focus": "far-field",
+            "voice_focus_threshold": 0.85,
+            "turn_detection": {"interrupt_response": interrupt_response},
         },
         "output": {
             "type": "audio",
@@ -104,33 +113,29 @@ def agent_payload(
         # Function tools are client-side session configuration. The server bridge attaches them after binding this
         # stored agent; keeping the stored list empty avoids converting them into provider-executed HTTP tools.
         "tools": [],
-        "llm": [
-            {
-                "base_url": LLM_GATEWAY_BASE,
-                "model": llm_model,
-                "api_key": api_key_for_gateway,
-            }
-        ],
+        # An empty list explicitly removes any stale custom-LLM override on PUT. AssemblyAI's managed
+        # conversational model is part of the Voice Agent API and requires no separate model entitlement.
+        "llm": [],
     }
 
 
-def desired_agents(*, voice_id: str, llm_model: str, api_key_for_gateway: str) -> dict[str, dict[str, Any]]:
+def desired_agents(*, voice_id: str) -> dict[str, dict[str, Any]]:
     return {
         "browser": agent_payload(
             name="Sawt Assurance - Browser Pre-Authorisation",
             voice_id=voice_id,
-            llm_model=llm_model,
-            api_key_for_gateway=api_key_for_gateway,
             encoding="audio/pcm",
             sample_rate=24000,
+            # Browser speaker output can leak into its microphone even with
+            # acoustic echo cancellation. Browser calls use half-duplex turns.
+            interrupt_response=False,
         ),
         "phone": agent_payload(
             name="Sawt Assurance - Phone Pre-Authorisation",
             voice_id=voice_id,
-            llm_model=llm_model,
-            api_key_for_gateway=api_key_for_gateway,
             encoding="audio/pcmu",
             sample_rate=8000,
+            interrupt_response=True,
         ),
     }
 
@@ -193,9 +198,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true", help="print payloads without calling AssemblyAI")
     parser.add_argument("--voice-id", default=os.environ.get("PREAUTH_ASSEMBLYAI_VOICE_ID", ""))
-    parser.add_argument(
-        "--llm-model", default=os.environ.get("PREAUTH_ASSEMBLYAI_LLM_MODEL", DEFAULT_LLM_MODEL)
-    )
     parser.add_argument("--api-base", default=os.environ.get("PREAUTH_ASSEMBLYAI_API_BASE", DEFAULT_API_BASE))
     args = parser.parse_args()
 
@@ -205,11 +207,7 @@ def main() -> int:
     voice_id = args.voice_id.strip()
 
     if args.dry_run:
-        payloads = desired_agents(
-            voice_id=voice_id or "<ASSEMBLYAI_VOICE_ID>",
-            llm_model=args.llm_model,
-            api_key_for_gateway="<ASSEMBLYAI_API_KEY>",
-        )
+        payloads = desired_agents(voice_id=voice_id or "<ASSEMBLYAI_VOICE_ID>")
         print(json.dumps({
             "agents": payloads,
             "webhook_subscriptions": {
@@ -248,7 +246,7 @@ def main() -> int:
 
     state = _load_state()
     client = AssemblyAIClient(api_key, api_base=args.api_base)
-    payloads = desired_agents(voice_id=voice_id, llm_model=args.llm_model, api_key_for_gateway=api_key)
+    payloads = desired_agents(voice_id=voice_id)
     try:
         _upsert_agents(client, state, payloads)
         _upsert_webhooks(client, state, public_base_url=base_url, secret=webhook_secret)

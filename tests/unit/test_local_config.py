@@ -25,7 +25,6 @@ def test_assemblyai_hosted_provider_is_selected_independently(monkeypatch):
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_BROWSER_AGENT_ID", "browser-agent")
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_PHONE_AGENT_ID", "phone-agent")
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_VOICE_ID", "alba")
-    monkeypatch.setenv("PREAUTH_ASSEMBLYAI_LLM_MODEL", "gemini-test")
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_API_BASE", "https://agents.example.test/")
     monkeypatch.setenv("PREAUTH_ASSEMBLYAI_WS_URL", "wss://agents.example.test/ws")
 
@@ -39,7 +38,6 @@ def test_assemblyai_hosted_provider_is_selected_independently(monkeypatch):
     assert settings.assemblyai_browser_agent_id == "browser-agent"
     assert settings.assemblyai_phone_agent_id == "phone-agent"
     assert settings.assemblyai_voice_id == "alba"
-    assert settings.assemblyai_llm_model == "gemini-test"
     assert settings.assemblyai_api_base == "https://agents.example.test"
     assert settings.assemblyai_ws_url == "wss://agents.example.test/ws"
 

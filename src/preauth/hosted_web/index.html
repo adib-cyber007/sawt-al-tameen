@@ -3,33 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sawt Assurance — pre-authorisation line</title>
-  <link rel="stylesheet" href="/voice/assets/styles.css">
+  <meta name="theme-color" content="#1a1848">
+  <title>Sawt al-Tameen — pre-authorisation voice assistant</title>
+  <link rel="stylesheet" href="/voice/assets/fonts.css?v=20260929-v2">
+<link rel="stylesheet" href="/voice/assets/styles.css?v=20260929-v2">
 </head>
 <body>
-  <main>
-    <section class="card">
-      <div class="heading">
-        <div>
-          <p class="eyebrow">Sawt Assurance</p>
-          <h1>Pre-authorisation voice assistant</h1>
+  <a class="skip-link" href="#workspace">Skip to call workspace</a>
+  <header class="site-header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><div><strong>Sawt al-Tameen</strong><span>The voice of insurance</span></div></div>
+    <span class="deployment">Pre-authorisation desk</span>
+  </header>
+  <main id="workspace">
+    <div class="page-heading"><div><h1>A clearer path to pre-authorisation.</h1><p>Talk through your request. We’ll help prepare it for review.</p></div><div class="context"><span class="chip">English calls</span></div></div>
+    <section class="preparation"><div class="preparation-intro"><h2>Before you call</h2><p>Keep these details nearby to help your request move smoothly.</p></div><ul class="preparation-list"><li>Provider number</li><li>Member policy number &amp; date of birth</li><li>Procedure code &amp; treatment date</li><li>Estimated cost in AED</li></ul></section>
+    <div class="workspace-grid">
+      <section class="card" aria-labelledby="call-heading">
+        <div class="heading"><div><h2 id="call-heading">Your conversation</h2><p class="sub">Pre-authorisation voice assistant</p></div><span id="connection" class="badge" role="status">Not connected</span></div>
+        <div id="transcript" class="transcript" role="log" aria-live="polite" aria-label="Call transcript" tabindex="0">
+          <div class="empty"><span class="voice-symbol" aria-hidden="true"><span class="orb-core"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span></span><h3>Let’s take it one step at a time.</h3><p>Start a call when you’re ready.<br>Your English-language transcript will appear here.</p><span class="empty-note">Speak naturally. The assistant will guide you.</span></div>
         </div>
-        <span id="connection" class="badge">Not connected</span>
-      </div>
-      <p class="intro">
-        Speak naturally to prepare a pre-authorisation request. The assistant can create and assess a case,
-        but only an authorised human reviewer can approve or deny it.
-      </p>
-      <div id="transcript" class="transcript" aria-live="polite" aria-label="Call transcript">
-        <p class="empty">Your English-language transcript will appear here.</p>
-      </div>
-      <div class="actions">
-        <button id="start" type="button">Start call</button>
-        <button id="end" type="button" class="secondary" disabled>End call</button>
-        <span id="status" role="status">Microphone access is requested only after you start.</span>
-      </div>
-    </section>
+        <div class="call-controls"><div class="actions"><button id="start" type="button">Start call</button><button id="end" type="button" class="secondary" disabled>End call</button><button id="resume" type="button" class="secondary" hidden>Resume audio</button></div><p id="status" role="status">Microphone access is requested only after you start.</p></div>
+      </section>
+      <aside class="guide" aria-label="Call guidance">
+        <section class="guidance"><h2>A little guidance</h2><p>Wait for <strong>“Listening”</strong> before speaking. Your microphone pauses while the assistant replies to prevent feedback.</p><p>Each reply briefly buffers to keep speech smooth.</p></section>
+        <section class="review-note"><h2>Prepared by the assistant.<br><span class="decision">Decided by a person.</span></h2><p>The assistant can create and assess a case. Only an authorised human reviewer can approve or deny it.</p></section>
+      </aside>
+    </div>
+    <footer class="page-footer"><span>Sawt al-Tameen / Sawt Assurance</span><span>Supporting your next step in care.</span></footer>
   </main>
-  <script src="/voice/assets/app.js"></script>
+  <script src="/voice/assets/app.js?v=20260928-2"></script>
 </body>
 </html>

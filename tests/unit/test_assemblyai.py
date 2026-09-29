@@ -46,21 +46,35 @@ def test_every_tool_converts_to_an_assemblyai_function_schema():
 def test_agent_payloads_use_channel_native_audio_and_one_tool_source():
     module = _load_script("assemblyai_setup.py")
 
-    agents = module.desired_agents(voice_id="alba", llm_model="gemini-test", api_key_for_gateway="test-key")
+    agents = module.desired_agents(voice_id="alba")
     assert set(agents) == {"browser", "phone"}
     assert agents["browser"]["input"]["format"] == {"encoding": "audio/pcm", "sample_rate": 24000}
     assert agents["phone"]["input"]["format"] == {"encoding": "audio/pcmu", "sample_rate": 8000}
+    assert agents["browser"]["input"]["turn_detection"] == {"interrupt_response": False}
+    assert agents["phone"]["input"]["turn_detection"] == {"interrupt_response": True}
     for payload in agents.values():
         assert payload["input"]["type"] == payload["output"]["type"] == "audio"
         assert payload["input"]["format"] == payload["output"]["format"]
         assert payload["tools"] == []
-        assert payload["llm"] == [{
-            "base_url": "https://llm-gateway.assemblyai.com/v1",
-            "model": "gemini-test",
-            "api_key": "test-key",
-        }]
+        assert payload["llm"] == []
         assert payload["input"]["keyterms"]
+        assert payload["input"]["language_codes"] == ["en"]
+        assert payload["input"]["transcription_mode"] == "balanced"
+        assert payload["input"]["voice_focus"] == "far-field"
+        assert "PRV-30011" in payload["input"]["transcription_prompt"]
         assert "never issue a final approval or denial" in payload["system_prompt"].lower()
+
+
+def test_recognition_keyterms_prioritise_every_known_provider_identity():
+    module = _load_script("assemblyai_setup.py")
+    terms = module.keyterms()
+    providers = json.loads(
+        (ROOT / "knowledge_base" / "network_providers.json").read_text(encoding="utf-8")
+    )["providers"]
+
+    assert len(terms) <= module.KEYTERM_LIMIT
+    assert all(provider["provider_id"] in terms for provider in providers)
+    assert all(provider["name"] in terms for provider in providers)
 
 
 def test_webhook_updates_do_not_send_immutable_agent_scope():

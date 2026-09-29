@@ -26,7 +26,8 @@ def test_assemblyai_setup_dry_run_builds_two_secret_free_payloads():
     assert set(payload["agents"]) == {"browser", "phone"}
     assert payload["agents"]["browser"]["input"]["format"]["encoding"] == "audio/pcm"
     assert payload["agents"]["phone"]["input"]["format"]["encoding"] == "audio/pcmu"
-    assert "<ASSEMBLYAI_API_KEY>" in result.stdout
+    assert payload["agents"]["browser"]["llm"] == []
+    assert "<ASSEMBLYAI_API_KEY>" not in result.stdout
     assert "session.completed" in result.stdout
 
 

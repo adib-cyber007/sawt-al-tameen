@@ -24,7 +24,6 @@ from preauth.infrastructure.settings import Settings
 logger = logging.getLogger("preauth.voice.assemblyai.bridge")
 RESUME_WINDOW_SECONDS = 30
 MAX_RESUME_ATTEMPTS = 3
-_UPSTREAM_ERRORS = (ConnectionClosed, WebSocketException, TimeoutError, OSError)
 
 
 class AssemblyAIResumeError(RuntimeError):
@@ -35,6 +34,27 @@ class AssemblyAIConfigurationError(RuntimeError):
     """The provider rejected the client-side tool configuration for a new session."""
 
 
+class AssemblyAITransientError(RuntimeError):
+    """The provider reported a retryable session failure."""
+
+
+class AssemblyAISessionError(RuntimeError):
+    """The provider reported a terminal session failure."""
+
+
+_UPSTREAM_ERRORS = (
+    ConnectionClosed,
+    WebSocketException,
+    TimeoutError,
+    OSError,
+    AssemblyAITransientError,
+)
+
+_RESUME_REFUSALS = {"session_not_found", "session_forbidden", "session_expired"}
+_TRANSIENT_SESSION_ERRORS = {"server_error", "agent_init_failed", "agent_timeout"}
+_CONFIGURATION_SESSION_ERRORS = {"invalid_format", "invalid_value", "immutable_field", "invalid_configuration"}
+
+
 class AssemblyAIToolCoordinator:
     """Executes function tools and releases results only at AssemblyAI's safe reply boundary."""
 
@@ -42,7 +62,35 @@ class AssemblyAIToolCoordinator:
         self._gateway = gateway
         self.session_id: str | None = None
         self.ready_count = 0
-        self._pending: list[dict[str, Any]] = []
+        self._pending: list[asyncio.Task[dict[str, Any]]] = []
+        self._last_tool_task: asyncio.Task[dict[str, Any]] | None = None
+
+    async def _execute_tool(
+        self, call_id: str, name: str, arguments: dict[str, Any],
+        previous: asyncio.Task[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        # Business tools retain their original call order, but a slow tool must not stall
+        # the provider receive pump and interrupt an in-progress spoken reply.
+        if previous is not None:
+            await previous
+        try:
+            response = await asyncio.to_thread(self._gateway.call, name, arguments, self.session_id)
+            value = response.model_dump(mode="json")
+            is_error = not response.ok
+        except Exception:
+            logger.exception("assemblyai_tool_call_unexpected_failure", extra={"tool": name})
+            value = {
+                "ok": False,
+                "error": {"code": "TOOL_EXECUTION_FAILED", "message": "The tool could not be completed."},
+                "guidance": "Apologise briefly and offer a human callback.",
+            }
+            is_error = True
+        return {
+            "type": "tool.result",
+            "call_id": call_id,
+            "result": json.dumps(value, separators=(",", ":")),
+            "is_error": is_error,
+        }
 
     async def handle(self, event: dict[str, Any]) -> list[dict[str, Any]]:
         event_type = event.get("type")
@@ -58,27 +106,9 @@ class AssemblyAIToolCoordinator:
             if not isinstance(call_id, str) or not isinstance(name, str) or not isinstance(arguments, dict):
                 logger.warning("assemblyai_tool_call_malformed")
                 return []
-            try:
-                response = await asyncio.to_thread(self._gateway.call, name, arguments, self.session_id)
-                value = response.model_dump(mode="json")
-                is_error = not response.ok
-            except Exception:
-                # An unexpected adapter failure must be useful to the model without exposing internals or secrets.
-                logger.exception("assemblyai_tool_call_unexpected_failure", extra={"tool": name})
-                value = {
-                    "ok": False,
-                    "error": {"code": "TOOL_EXECUTION_FAILED", "message": "The tool could not be completed."},
-                    "guidance": "Apologise briefly and offer a human callback.",
-                }
-                is_error = True
-            self._pending.append(
-                {
-                    "type": "tool.result",
-                    "call_id": call_id,
-                    "result": json.dumps(value, separators=(",", ":")),
-                    "is_error": is_error,
-                }
-            )
+            task = asyncio.create_task(self._execute_tool(call_id, name, arguments, self._last_tool_task))
+            self._last_tool_task = task
+            self._pending.append(task)
             return []
 
         if event_type == "reply.done":
@@ -86,7 +116,7 @@ class AssemblyAIToolCoordinator:
                 self._pending.clear()
                 return []
             ready, self._pending = self._pending, []
-            return ready
+            return await asyncio.gather(*ready) if ready else []
         return []
 
 
@@ -115,14 +145,16 @@ def _safe_browser_event(event: dict[str, Any]) -> dict[str, Any] | None:
 
 async def _run_pair(left: Callable[[], Awaitable[None]], right: Callable[[], Awaitable[None]]) -> None:
     tasks = {asyncio.create_task(left()), asyncio.create_task(right())}
-    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    await asyncio.gather(*pending, return_exceptions=True)
-    for task in done:
-        exc = task.exception()
-        if exc:
-            raise exc
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
+    finally:
+        # Also drain both pumps when the enclosing request is cancelled (for example on shutdown).
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _run_resumable(
@@ -144,8 +176,8 @@ async def _run_resumable(
             if coordinator.ready_count > ready_before:
                 deadline = now + RESUME_WINDOW_SECONDS
                 attempts = 0
-            if not coordinator.session_id or deadline is None:
-                raise
+            if deadline is None:
+                deadline = now + RESUME_WINDOW_SECONDS
             attempts += 1
             if attempts > MAX_RESUME_ATTEMPTS or now >= deadline:
                 raise AssemblyAIResumeError("AssemblyAI session resume window was exhausted") from exc
@@ -217,15 +249,29 @@ async def bridge_browser(websocket: WebSocket, settings: Settings, gateway: Voic
                         else:
                             await _send_provider(
                                 provider,
-                                {"type": "session.update", "session": {"tools": all_function_tool_configs()}},
+                                {
+                                    "type": "session.update",
+                                    "session": {
+                                        "tools": all_function_tool_configs(),
+                                        "input": {"turn_detection": {"interrupt_response": False}},
+                                    },
+                                },
                             )
                     elif event_type == "session.updated" and not resume_session_id:
                         ready.set()
                     if event_type == "session.error":
-                        if event.get("code") in {"session_not_found", "session_forbidden", "session_expired"}:
+                        code = event.get("code")
+                        logger.warning(
+                            "assemblyai_browser_session_error",
+                            extra={"session_id": coordinator.session_id, "provider_code": code},
+                        )
+                        if code in _RESUME_REFUSALS:
                             raise AssemblyAIResumeError("AssemblyAI refused to resume the session")
-                        if not ready.is_set():
+                        if code in _TRANSIENT_SESSION_ERRORS:
+                            raise AssemblyAITransientError("AssemblyAI reported a transient session failure")
+                        if not ready.is_set() or code in _CONFIGURATION_SESSION_ERRORS:
                             raise AssemblyAIConfigurationError("AssemblyAI rejected the session tool configuration")
+                        raise AssemblyAISessionError("AssemblyAI reported a terminal session failure")
                     for result in await coordinator.handle(event):
                         await _send_provider(provider, result)
                     safe = _safe_browser_event(event)
@@ -320,10 +366,22 @@ async def bridge_twilio(
                     elif event_type == "session.updated" and not resume_session_id:
                         provider_ready.set()
                     if event_type == "session.error":
-                        if event.get("code") in {"session_not_found", "session_forbidden", "session_expired"}:
+                        code = event.get("code")
+                        logger.warning(
+                            "assemblyai_twilio_session_error",
+                            extra={
+                                "session_id": coordinator.session_id,
+                                "call_sid": expected_call_sid,
+                                "provider_code": code,
+                            },
+                        )
+                        if code in _RESUME_REFUSALS:
                             raise AssemblyAIResumeError("AssemblyAI refused to resume the session")
-                        if not provider_ready.is_set():
+                        if code in _TRANSIENT_SESSION_ERRORS:
+                            raise AssemblyAITransientError("AssemblyAI reported a transient session failure")
+                        if not provider_ready.is_set() or code in _CONFIGURATION_SESSION_ERRORS:
                             raise AssemblyAIConfigurationError("AssemblyAI rejected the session tool configuration")
+                        raise AssemblyAISessionError("AssemblyAI reported a terminal session failure")
                     for result in await coordinator.handle(event):
                         await _send_provider(provider, result)
                     if event_type == "reply.audio" and isinstance(event.get("data"), str):
@@ -345,7 +403,13 @@ async def close_after_bridge(websocket: WebSocket, bridge: Awaitable[None]) -> N
     """Map upstream failures to a generic WebSocket close without leaking credentials or response bodies."""
     try:
         await bridge
-    except (*_UPSTREAM_ERRORS, json.JSONDecodeError, AssemblyAIResumeError, AssemblyAIConfigurationError):
+    except (
+        *_UPSTREAM_ERRORS,
+        json.JSONDecodeError,
+        AssemblyAIResumeError,
+        AssemblyAIConfigurationError,
+        AssemblyAISessionError,
+    ):
         logger.exception("assemblyai_bridge_failed")
         try:
             await websocket.close(code=1011, reason="Voice service unavailable")

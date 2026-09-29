@@ -70,7 +70,8 @@ def create_app(
 
         @app.get("/voice", tags=["Voice channel (AssemblyAI)"], summary="Hosted voice console", include_in_schema=False)
         def hosted_voice_console() -> FileResponse:
-            return FileResponse(hosted_web / "index.html")
+            # Always fetch the current HTML, which selects versioned worklets.
+            return FileResponse(hosted_web / "index.html", headers={"Cache-Control": "no-store"})
 
     if local_runtime is not None:
         from preauth.api.routes import local as local_routes

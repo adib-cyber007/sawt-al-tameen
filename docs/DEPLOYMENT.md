@@ -33,7 +33,7 @@ in git-ignored `.hosted/secrets.env`. A rerun updates existing agents/subscripti
 | Variable | Secret | Purpose |
 |---|---:|---|
 | `VOICE_PROVIDER=assemblyai` | No | Selects the migrated hosted provider |
-| `ASSEMBLYAI_API_KEY` | Yes | Voice Agent REST/WebSocket, Sessions and LLM Gateway |
+| `ASSEMBLYAI_API_KEY` | Yes | Voice Agent REST/WebSocket and Sessions API |
 | `PREAUTH_ASSEMBLYAI_VOICE_ID` | No | English voice; defaults to `ivy` (professional and deliberate) in `.env.example` |
 | `PREAUTH_PUBLIC_BASE_URL` | No | Stable HTTPS URL (derived from ngrok domain when ngrok is selected) |
 | `PREAUTH_ASSEMBLYAI_WEBHOOK_SECRET` | Yes | Generated HMAC secret for completed-session deliveries |
@@ -53,7 +53,31 @@ Choose one option in `.env`.
 
 Set `NGROK_AUTHTOKEN` and the bare `NGROK_STATIC_DOMAIN`. The launcher derives
 `PREAUTH_PUBLIC_BASE_URL=https://<domain>`, validates that the token/domain pair can register, and then starts the
-tunnel against `PREAUTH_HOSTED_PORT`.
+tunnel against `PREAUTH_HOSTED_PORT`. The hostname stays the same across runs, but it only reaches the app while
+the backend and ngrok processes are running on this computer. Sleeping or shutting down the computer makes it
+unavailable.
+
+On Windows, run `powershell -File scripts/start_hosted.ps1` from the repository root to start both processes in the
+background. It waits for the public health check and writes startup output to `.hosted/launcher.stdout.log` and
+`.hosted/launcher.stderr.log`. Repeating it while the site is healthy does not start a second copy. This command
+does not configure automatic startup after a reboot. To restore the service automatically when you sign in, run
+`powershell -File scripts/install_hosted_autostart.ps1` once. It registers a current-user Windows task and retries
+startup if the network is not ready. It does not keep the site online while the computer is asleep or signed out.
+
+On Windows, the running hosted launcher asks the system to stay awake while the laptop is plugged into AC power.
+It releases that request when unplugged or stopped. Battery sleep settings are unchanged. Closing the lid,
+pressing the power button, hibernating, or switching off the computer can still take the ngrok endpoint offline.
+Keep the laptop plugged in and awake for continuous testing from its static URL.
+
+The first visit to a free ngrok domain in a browser may display ngrok's warning page. Use its Visit Site button
+once before testing `/voice`. The startup health check bypasses this HTML page so it checks the app itself.
+
+If ngrok reports `ERR_NGROK_3004`, check whether `http://127.0.0.1:<PREAUTH_HOSTED_PORT>/health` responds and
+read `.hosted/tunnel.log` at the time of failure. The launcher forwards to an explicit HTTP loopback URL and,
+while running, checks the public `/health` every 15 seconds. After three consecutive public failures while the
+local backend is healthy, it restarts ngrok on the same static domain. A dropped internet connection can still
+interrupt a current call. For uninterrupted availability while this computer sleeps or loses connectivity,
+deploy the Docker image and a persistent PostgreSQL database to an always-on host.
 
 ### Cloudflare named tunnel
 
@@ -86,7 +110,8 @@ Put the printed browser and phone ids into the corresponding environment variabl
 ## Browser calling
 
 Open `https://<public-base-url>/voice`. The page connects only to the backend. The AssemblyAI API key stays on the
-server. Browser audio is mono signed PCM16 at 24 kHz in both directions.
+server. The browser captures at the device's native rate and resamples to mono signed PCM16 at 24 kHz; provider
+audio is mono signed PCM16 at 24 kHz in the other direction.
 
 ## Twilio phone calling
 

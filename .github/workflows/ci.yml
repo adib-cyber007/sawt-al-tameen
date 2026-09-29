@@ -6,6 +6,16 @@ on:
   pull_request:
 
 jobs:
+  browser-audio:
+    name: browser audio and call lifecycle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test tests/voice_audio.test.mjs
+
   tests:
     name: tests (${{ matrix.database }})
     runs-on: ubuntu-latest

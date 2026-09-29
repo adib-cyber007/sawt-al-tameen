@@ -3,62 +3,55 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sawt Assurance — local pre-authorisation console</title>
-<link rel="stylesheet" href="/local/assets/styles.css">
+<meta name="theme-color" content="#1a1848">
+<title>Sawt al-Tameen — local pre-authorisation console</title>
+<link rel="stylesheet" href="/local/assets/fonts.css?v=20260929-v2">
+<link rel="stylesheet" href="/local/assets/styles.css?v=20260929-v2">
 </head>
 <body>
-<header>
-  <div>
-    <h1>Sawt Assurance <span class="muted">pre-authorisation line</span></h1>
-    <p class="sub">Local deployment — everything on this page runs on this machine.</p>
-  </div>
-  <div id="engines" class="engines muted">connecting…</div>
+<a class="skip-link" href="#workspace">Skip to call workspace</a>
+<header class="site-header">
+  <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><div><strong>Sawt al-Tameen</strong><span>The voice of insurance</span></div></div>
+  <span class="deployment">Local pre-authorisation desk</span>
 </header>
-
-<main>
-  <section class="panel transcript-panel">
-    <h2>Call</h2>
-    <div id="transcript" class="transcript" aria-live="polite"></div>
-    <form id="composer" autocomplete="off">
-      <input id="input" type="text" placeholder="Type what the caller says…" aria-label="Caller turn" disabled>
-      <button id="send" type="submit" disabled>Send</button>
-      <button id="mic" type="button" class="mic" disabled title="Hold to record, click to stop">🎙 Record</button>
-    </form>
-    <div class="actions">
-      <button id="start" type="button">Start call</button>
-      <button id="finish" type="button" disabled>End call &amp; store transcript</button>
-      <span id="status" class="status muted"></span>
-    </div>
-  </section>
-
-  <section class="panel state-panel">
-    <h2>Case</h2>
-    <dl id="state">
-      <dt>Conversation</dt><dd id="s-conversation">—</dd>
-      <dt>Caller verified</dt><dd id="s-verified">no</dd>
-      <dt>Case reference</dt><dd id="s-case">—</dd>
-      <dt>Case status</dt><dd id="s-status">—</dd>
-      <dt>Agent recommendation</dt><dd id="s-outcome">—</dd>
-      <dt>Escalation</dt><dd id="s-escalation">—</dd>
-      <dt>Human review</dt><dd id="s-review">—</dd>
-    </dl>
-
-    <h3>Request details collected</h3>
-    <ul id="s-intake" class="checklist"></ul>
-
-    <h3>Documents outstanding</h3>
-    <ul id="s-documents" class="checklist"><li class="muted">—</li></ul>
-
-    <h3>Tool activity</h3>
-    <ol id="s-tools" class="tools"><li class="muted">no tools called yet</li></ol>
-
-    <p class="boundary">
-      This agent prepares recommendations. It has no tool that can approve, deny or finalise an authorisation —
-      a qualified human reviewer decides every case.
-    </p>
-  </section>
+<main id="workspace">
+  <div class="page-heading"><div><h1>Every request, a conversation.</h1><p>Prepare a case for human review, with the details in view.</p></div><div class="context"><span class="chip">English calls</span></div></div>
+  <div class="workspace-grid local-grid">
+    <section class="card transcript-panel" aria-labelledby="call-heading">
+      <div class="heading"><div><h2 id="call-heading">Your conversation</h2><p class="sub">Type a message after starting a call. Voice recording is available when configured.</p></div><span class="badge">Local console</span></div>
+      <div id="transcript" class="transcript" role="log" aria-label="Call transcript" aria-live="polite" tabindex="0"><div class="empty"><span class="voice-symbol" aria-hidden="true"><span class="orb-core"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span></span><h3>Ready when you are.</h3><p>Start a call to prepare a pre-authorisation request.<br>The conversation and case details will appear as you go.</p></div></div>
+      <div class="call-controls">
+        <form id="composer" autocomplete="off">
+          <input id="input" type="text" placeholder="Type what the caller says…" aria-label="Caller turn" disabled>
+          <button id="send" type="submit" disabled>Send</button>
+          <button id="mic" type="button" class="mic secondary" disabled title="Click to record; click again to stop">🎙 Record</button>
+        </form>
+        <div class="actions"><button id="start" type="button">Start call</button><button id="finish" type="button" class="secondary" disabled>End call &amp; store transcript</button></div>
+        <p id="status" class="status muted" role="status"></p>
+      </div>
+    </section>
+    <aside class="card state-panel" aria-labelledby="case-heading">
+      <div class="heading"><div><h2 id="case-heading">Case overview</h2><p class="sub">Details collected during this call</p></div></div>
+      <div class="state-content">
+        <dl id="state">
+          <dt>Conversation</dt><dd id="s-conversation">—</dd>
+          <dt>Caller verified</dt><dd id="s-verified">no</dd>
+          <dt>Case reference</dt><dd id="s-case">—</dd>
+          <dt>Case status</dt><dd id="s-status">—</dd>
+          <dt>Agent recommendation</dt><dd id="s-outcome">—</dd>
+          <dt>Escalation</dt><dd id="s-escalation">—</dd>
+          <dt>Human review</dt><dd id="s-review">—</dd>
+        </dl>
+        <h3>Request details collected</h3><ul id="s-intake" class="checklist"><li class="muted">No details collected yet.</li></ul>
+        <h3>Documents outstanding</h3><ul id="s-documents" class="checklist"><li class="muted">—</li></ul>
+        <h3>Tool activity</h3><ol id="s-tools" class="tools"><li class="muted">no tools called yet</li></ol>
+        <p class="boundary">This agent prepares recommendations. It has no tool that can approve, deny or finalise an authorisation — a qualified human reviewer decides every case.</p>
+      </div>
+    </aside>
+  </div>
+  <details class="runtime-details"><summary>Local engine status</summary><p class="sub">This console uses the local agent running on this machine.</p><div id="engines" class="engines muted" role="status">connecting…</div></details>
+  <footer class="page-footer"><span>Sawt al-Tameen / Sawt Assurance</span><span>Prepared by the assistant. Decided by a person.</span></footer>
 </main>
-
 <audio id="player"></audio>
 <script src="/local/assets/app.js"></script>
 </body>

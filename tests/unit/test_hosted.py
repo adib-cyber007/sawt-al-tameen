@@ -35,6 +35,68 @@ def test_backend_environment_selects_hosted_mode_and_hides_tunnel_credentials():
     assert "CLOUDFLARE_TUNNEL_TOKEN" not in env
 
 
+def test_ngrok_uses_explicit_http_loopback_upstream_without_putting_token_in_arguments():
+    hosted = _module()
+    calls = []
+
+    class Processes:
+        def start(self, name, command, env):
+            calls.append((name, command, env["NGROK_AUTHTOKEN"]))
+
+    hosted.launch_ngrok_tunnel(
+        {
+            "NGROK_AUTHTOKEN": "private-token",
+            "PREAUTH_HOSTED_PORT": "8000",
+            "PREAUTH_PUBLIC_BASE_URL": "https://voice.ngrok-free.dev",
+        },
+        Processes(),
+    )
+    name, command, token = calls[0]
+    assert name == "tunnel"
+    assert command[:3] == ["ngrok", "http", "http://127.0.0.1:8000"]
+    assert command[3:5] == ["--url", "https://voice.ngrok-free.dev"]
+    assert token == "private-token" and "private-token" not in command
+
+
+def test_ngrok_health_recovers_persistent_public_failure_without_restarting_backend(monkeypatch):
+    hosted = _module()
+    calls = []
+    responses = iter([(502, ""), (502, ""), (502, ""), (200, '{"status":"ok"}')])
+
+    def status(url, timeout):
+        if url.startswith("http://127.0.0.1"):
+            return 200, '{"status":"ok"}'
+        return next(responses)
+
+    class Processes:
+        def stop(self, name):
+            calls.append(("stop", name))
+
+    monkeypatch.setattr(hosted, "http_status", status)
+    monkeypatch.setattr(hosted, "launch_ngrok_tunnel", lambda config, processes: calls.append(("start", "tunnel")))
+    config = {"PREAUTH_PUBLIC_BASE_URL": "https://voice.ngrok-free.dev", "PREAUTH_HOSTED_PORT": "8000"}
+    failures = 0
+    for _ in range(4):
+        failures = hosted.check_ngrok_health(config, Processes(), failures)
+    assert failures == 0
+    assert calls == [("stop", "tunnel"), ("start", "tunnel")]
+
+
+def test_hosted_launcher_inhibits_idle_sleep_on_ac_only(monkeypatch):
+    hosted = _module()
+    ac = [True]
+    flags = []
+    monkeypatch.setattr(hosted, "_IS_WINDOWS", True)
+    monkeypatch.setattr(hosted, "_on_ac_power", lambda: ac[0])
+    monkeypatch.setattr(hosted, "_set_execution_state", lambda value: flags.append(value) or True)
+
+    assert hosted.maintain_awake_on_ac(False) is True
+    assert hosted.maintain_awake_on_ac(True) is True
+    ac[0] = False
+    assert hosted.maintain_awake_on_ac(True) is False
+    assert flags == [hosted._ES_CONTINUOUS | hosted._ES_SYSTEM_REQUIRED, hosted._ES_CONTINUOUS]
+
+
 def test_provider_setup_dispatches_only_to_assemblyai(monkeypatch):
     hosted = _module()
     calls = []

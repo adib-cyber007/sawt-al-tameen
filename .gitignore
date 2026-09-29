@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 .venv/
+.testenv/
+.uv-cache/
 .pytest_cache/
+.playwright-mcp/
 *.db
 *.db-journal
 .env

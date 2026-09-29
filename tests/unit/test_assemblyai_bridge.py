@@ -1,5 +1,8 @@
 import asyncio
 import json
+import threading
+
+import pytest
 
 from preauth.agent_tools.voice_gateway import VoiceToolResponse
 from preauth.api import assemblyai_bridge
@@ -16,6 +19,51 @@ class FakeGateway:
     def call(self, name, arguments, conversation_id=None):
         self.calls.append((name, arguments, conversation_id))
         return self.response
+
+
+def test_cancelling_bridge_pair_drains_both_audio_pumps():
+    async def scenario():
+        started = [asyncio.Event(), asyncio.Event()]
+        stopped = []
+
+        async def pump(index):
+            started[index].set()
+            try:
+                await asyncio.Future()
+            finally:
+                stopped.append(index)
+
+        task = asyncio.create_task(assemblyai_bridge._run_pair(lambda: pump(0), lambda: pump(1)))
+        await asyncio.gather(*(event.wait() for event in started))
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert sorted(stopped) == [0, 1]
+
+    asyncio.run(scenario())
+
+
+def test_failed_audio_pump_drains_its_peer_and_preserves_error():
+    async def scenario():
+        started = asyncio.Event()
+        stopped = asyncio.Event()
+
+        async def receiver():
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                stopped.set()
+
+        async def sender():
+            await started.wait()
+            raise OSError("disconnected")
+
+        with pytest.raises(OSError, match="disconnected"):
+            await assemblyai_bridge._run_pair(receiver, sender)
+        assert stopped.is_set()
+
+    asyncio.run(scenario())
 
 
 class FakeProvider:
@@ -132,6 +180,39 @@ def test_failed_tool_result_is_marked_as_an_error():
     assert json.loads(result["result"])["error"]["code"] == "NOT_FOUND"
 
 
+def test_slow_tool_does_not_block_incoming_audio_and_keeps_tool_order():
+    started = threading.Event()
+    release = threading.Event()
+
+    class SlowGateway(FakeGateway):
+        def call(self, name, arguments, conversation_id=None):
+            if name == "first":
+                started.set()
+                assert release.wait(timeout=2)
+            return super().call(name, arguments, conversation_id)
+
+    gateway = SlowGateway()
+    coordinator = AssemblyAIToolCoordinator(gateway)
+
+    async def scenario():
+        await coordinator.handle({"type": "session.ready", "session_id": "sess_slow"})
+        await coordinator.handle({"type": "tool.call", "call_id": "1", "name": "first", "arguments": {}})
+        await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=1)
+        await asyncio.wait_for(coordinator.handle({"type": "reply.audio", "data": "pcm"}), timeout=0.1)
+        await coordinator.handle({"type": "tool.call", "call_id": "2", "name": "second", "arguments": {}})
+        assert gateway.calls == []
+        release.set()
+        return await coordinator.handle({"type": "reply.done"})
+
+    try:
+        results = asyncio.run(scenario())
+    finally:
+        release.set()
+    assert [result["call_id"] for result in results] == ["1", "2"]
+    assert [call[0] for call in gateway.calls] == ["first", "second"]
+    assert all(call[2] == "sess_slow" for call in gateway.calls)
+
+
 def test_browser_bridge_maps_pcm_audio_and_sanitises_ready_event(monkeypatch):
     provider = FakeProvider(
         [
@@ -155,6 +236,9 @@ def test_browser_bridge_maps_pcm_audio_and_sanitises_ready_event(monkeypatch):
         "type": "session.update", "session": {"agent_id": "agent_browser"}
     }
     assert provider.sent[1]["type"] == "session.update"
+    assert provider.sent[1]["session"]["input"] == {
+        "turn_detection": {"interrupt_response": False}
+    }
     assert [tool["name"] for tool in provider.sent[1]["session"]["tools"]] == [
         "verify_caller", "check_coverage_rule", "log_transcript"
     ]
@@ -244,6 +328,40 @@ def test_browser_bridge_resumes_the_same_provider_session_after_a_network_drop(m
     }
     assert resumed.sent[0] == {"type": "session.resume", "session_id": "sess_resume"}
     assert client.sent[-1] == {"type": "transcript.user", "text": "still connected"}
+
+
+def test_browser_bridge_resumes_after_a_transient_provider_session_error(monkeypatch):
+    first = FakeProvider(
+        [
+            {"type": "session.ready", "session_id": "sess_transient"},
+            {"type": "session.updated"},
+            {"type": "session.error", "code": "server_error", "message": "at capacity"},
+        ]
+    )
+    resumed = FakeProvider(
+        [
+            {"type": "session.ready", "session_id": "sess_transient"},
+            {"type": "transcript.agent", "text": "I am still here."},
+        ]
+    )
+    providers = iter([first, resumed])
+    client = FakeClientSocket([])
+    monkeypatch.setattr(assemblyai_bridge, "connect", lambda *args, **kwargs: next(providers))
+
+    async def no_delay(_):
+        return None
+
+    monkeypatch.setattr(assemblyai_bridge.asyncio, "sleep", no_delay)
+    settings = Settings(
+        voice_provider=VoiceProvider.ASSEMBLYAI,
+        assemblyai_api_key="secret",
+        assemblyai_browser_agent_id="agent_browser",
+    )
+
+    asyncio.run(assemblyai_bridge.bridge_browser(client, settings, FakeGateway()))
+
+    assert resumed.sent[0] == {"type": "session.resume", "session_id": "sess_transient"}
+    assert client.sent[-1] == {"type": "transcript.agent", "text": "I am still here."}
 
 
 def test_twilio_bridge_resumes_without_losing_the_stream_identity(monkeypatch):
