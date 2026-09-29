@@ -154,7 +154,7 @@ async def run_tool_result(response=None):
         await coordinator.handle({"type": "tool.call", "call_id": "call_1", "name": "lookup", "arguments": {"x": 1}})
         await wait_until(lambda: coordinator._pending[0].result is not None)
         assert provider.sent == []
-        await coordinator.handle({"type": "reply.done", "reply_id": "fc-call_1", "status": "completed"})
+        await coordinator.handle({"type": "reply.done"})
         await wait_until(lambda: provider.sent)
         return gateway, provider.sent
     finally:
@@ -169,6 +169,45 @@ def test_tool_result_waits_for_reply_done_and_uses_provider_session_and_call_ids
     assert gateway.call_ids == ["call_1"]
     assert results[0]["call_id"] == "call_1"
     assert results[0]["is_error"] is False
+
+
+def test_tool_result_survives_unrelated_events_and_unmatched_reply_id():
+    async def scenario():
+        coordinator = AssemblyAIToolCoordinator(FakeGateway())
+        provider = FakeProvider([])
+        dispatch = asyncio.create_task(coordinator.dispatch(provider))
+        try:
+            await coordinator.handle({"type": "session.ready", "session_id": "sess_live"})
+            await coordinator.handle({"type": "tool.call", "call_id": "chatcmpl-tool-1", "name": "lookup", "arguments": {}})
+            await coordinator.handle({"type": "reply.done", "reply_id": "unrelated-reply"})
+            await coordinator.handle({"type": "transcript.agent", "text": "Checking now"})
+            await wait_until(lambda: provider.sent)
+            assert provider.sent[0]["call_id"] == "chatcmpl-tool-1"
+        finally:
+            dispatch.cancel()
+            await asyncio.gather(dispatch, return_exceptions=True)
+            await coordinator.close()
+
+    asyncio.run(scenario())
+
+
+def test_tool_call_just_after_reply_done_uses_completed_boundary():
+    async def scenario():
+        coordinator = AssemblyAIToolCoordinator(FakeGateway())
+        provider = FakeProvider([])
+        dispatch = asyncio.create_task(coordinator.dispatch(provider))
+        try:
+            await coordinator.handle({"type": "session.ready", "session_id": "sess_live"})
+            await coordinator.handle({"type": "reply.done"})
+            await coordinator.handle({"type": "tool.call", "call_id": "call-2", "name": "lookup", "arguments": {}})
+            await wait_until(lambda: provider.sent)
+            assert provider.sent[0]["call_id"] == "call-2"
+        finally:
+            dispatch.cancel()
+            await asyncio.gather(dispatch, return_exceptions=True)
+            await coordinator.close()
+
+    asyncio.run(scenario())
 
 
 def test_failed_tool_result_is_marked_as_an_error():
@@ -282,7 +321,7 @@ def test_browser_bridge_maps_pcm_audio_and_sanitises_ready_event(monkeypatch):
     }
     assert provider.sent[1]["type"] == "session.update"
     assert provider.sent[1]["session"]["input"] == {
-        "turn_detection": {"interrupt_response": False}
+        "turn_detection": {"interrupt_response": True}
     }
     assert [tool["name"] for tool in provider.sent[1]["session"]["tools"]] == [
         "verify_caller", "check_coverage_rule", "log_transcript"
@@ -297,7 +336,7 @@ def test_browser_bridge_maps_pcm_audio_and_sanitises_ready_event(monkeypatch):
     ]
 
 
-def test_reconnect_holds_completed_results_until_matching_new_boundary():
+def test_reconnect_holds_completed_results_until_next_clean_boundary():
     async def scenario():
         coordinator = AssemblyAIToolCoordinator(FakeGateway())
         provider = FakeProvider([])
@@ -308,10 +347,7 @@ def test_reconnect_holds_completed_results_until_matching_new_boundary():
             await wait_until(lambda: coordinator._pending[0].result is not None)
             coordinator.disconnected()
             await coordinator.handle({"type": "session.ready", "session_id": "sess_resume"})
-            await coordinator.handle({"type": "reply.done", "reply_id": "fc-other", "status": "completed"})
-            await asyncio.sleep(.01)
-            assert provider.sent == []
-            await coordinator.handle({"type": "reply.done", "reply_id": "fc-1", "status": "completed"})
+            await coordinator.handle({"type": "reply.done"})
             await wait_until(lambda: provider.sent)
             assert provider.sent[0]["call_id"] == "1"
             with pytest.raises(assemblyai_bridge.AssemblyAIResumeError):
@@ -347,6 +383,7 @@ def test_queued_work_cannot_start_after_interruption_close_or_deadline(monkeypat
             await wait_until(started.is_set)
             if finish == "interrupt":
                 await coordinator.handle({"type": "input.speech.started"})
+                await coordinator.handle({"type": "reply.done", "status": "interrupted"})
             elif finish == "close":
                 await coordinator.close()
             else:
@@ -613,3 +650,73 @@ def test_bridge_failures_close_the_client_without_leaking_upstream_details():
 
     asyncio.run(assemblyai_bridge.close_after_bridge(client, failure()))
     assert client.closed == [(1011, "Voice service unavailable")]
+
+@pytest.mark.parametrize('pause_event', ['input.speech.started', 'reply.started'])
+def test_backchannel_and_next_transition_do_not_discard_tool_results(pause_event):
+    async def scenario():
+        coordinator = AssemblyAIToolCoordinator(FakeGateway())
+        provider = FakeProvider([])
+        dispatcher = asyncio.create_task(coordinator.dispatch(provider))
+        try:
+            await coordinator.handle({'type': 'session.ready', 'session_id': 'same-session'})
+            await coordinator.handle({'type': 'tool.call', 'call_id': 'keep', 'name': 'lookup', 'arguments': {}})
+            await wait_until(lambda: coordinator._pending[0].result is not None)
+            await coordinator.handle({'type': 'reply.done', 'status': 'completed'})
+            # No yield: provider events can arrive in the same read batch before dispatch.
+            await coordinator.handle({'type': pause_event})
+            await asyncio.sleep(.01)
+            assert provider.sent == []
+            assert len(coordinator._pending) == 1
+            await coordinator.handle({'type': 'reply.done', 'status': 'completed'})
+            await wait_until(lambda: provider.sent)
+            assert provider.sent[0]['call_id'] == 'keep'
+        finally:
+            dispatcher.cancel()
+            await asyncio.gather(dispatcher, return_exceptions=True)
+            await coordinator.close()
+    asyncio.run(scenario())
+
+
+def test_corrections_are_bounded_user_messages_and_connection_ping_stays_local(monkeypatch):
+    async def scenario():
+        provider = FakeProvider([])
+        class Provider(FakeProvider):
+            async def __aiter__(self):
+                for e in [{'type': 'session.ready', 'session_id': 'correct'}, {'type': 'session.updated'}]:
+                    yield json.dumps(e)
+                await asyncio.Future()
+        provider = Provider([])
+        client = FakeClientSocket([])
+        async def incoming():
+            await wait_until(lambda: any(e['type'] == 'session.ready' for e in client.sent))
+            for e in [
+                {'type': 'conversation.correction', 'text': 'x' * 1001},
+                {'type': 'conversation.correction', 'text': 'Alex', 'role': 'system'},
+                {'type': 'connection.ping'}, {'type': 'session.end'},
+            ]:
+                yield e
+        incoming_events = incoming()
+        client.receive_json = lambda: anext(incoming_events)
+        monkeypatch.setattr(assemblyai_bridge, 'connect', lambda *a, **kw: provider)
+        saved = []
+        await assemblyai_bridge.bridge_browser(client, Settings(assemblyai_api_key='secret', assemblyai_browser_agent_id='agent'), FakeGateway(),
+            lambda session, content: saved.append((session, content)))
+        assert saved == [('correct', 'Alex')]
+        messages = [e for e in provider.sent if e['type'] == 'conversation.message']
+        assert messages == [{'type': 'conversation.message', 'role': 'user', 'content': 'Correction to what I said: Alex'}]
+        assert any(e['type'] == 'correction.error' for e in client.sent)
+        assert any(e['type'] == 'correction.accepted' for e in client.sent)
+        assert {'type': 'connection.pong'} in client.sent
+        assert all(e['type'] != 'connection.ping' for e in provider.sent)
+    asyncio.run(scenario())
+
+def test_initial_session_updated_cannot_release_audio_before_session_ready(monkeypatch):
+    provider = FakeProvider([
+        {'type': 'session.updated'},
+        {'type': 'session.ready', 'session_id': 'session-ordered'},
+        {'type': 'session.updated'},
+    ])
+    client = FakeClientSocket([])
+    monkeypatch.setattr(assemblyai_bridge, 'connect', lambda *a, **kw: provider)
+    asyncio.run(assemblyai_bridge.bridge_browser(client, Settings(assemblyai_api_key='secret', assemblyai_browser_agent_id='agent'), FakeGateway()))
+    assert client.sent == [{'type': 'session.ready', 'session_id': 'session-ordered'}]

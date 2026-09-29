@@ -522,6 +522,16 @@ class VoiceProviderCall(Base):
     request_hash: Mapped[str] = mapped_column(String(64))
 
 
+class VoiceTextCorrection(Base):
+    """Immutable caller text submitted to the bridge, omitted by provider timelines."""
+
+    __tablename__ = "voice_text_corrections"
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(100), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    submitted_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
 class CallRecord(Base):
     """Transcript and analysis delivered by the voice platform's post-call webhook."""
 
@@ -568,4 +578,5 @@ APPEND_ONLY_TABLES = (
     "call_records",
     "caller_verifications",
     "call_logs",
+    "voice_text_corrections",
 )

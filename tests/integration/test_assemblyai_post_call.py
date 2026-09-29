@@ -236,3 +236,21 @@ def test_webhook_is_disabled_without_provider_configuration(services):
         response = client.post("/api/v1/voice/assemblyai/post-call", content=b"{}")
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "CHANNEL_NOT_CONFIGURED"
+
+def test_typed_correction_is_durable_scoped_and_included_in_final_call_record(services, session_factory):
+    from preauth.infrastructure.db.models import VoiceTextCorrection
+    correction_id = services.voice.record_text_correction(SESSION_ID, 'The correct name is Morgan.')
+    services.voice.record_text_correction('unrelated-session', 'This must not appear.')
+    fake = FakeAssemblyAIClient()
+    _ready_session(fake)
+    client = _client(services, fake)
+    assert _post(client, _completed_event()).status_code == 200
+    assert _post(client, _completed_event()).status_code == 200
+    with session_factory() as session:
+        record = session.scalar(select(CallRecord).where(CallRecord.conversation_id == SESSION_ID))
+        corrections = [turn for turn in record.transcript if turn.get('source') == 'typed_correction']
+        assert len(corrections) == 1
+        assert corrections[0]['message'] == 'The correct name is Morgan.'
+        assert corrections[0]['correction_id'] == correction_id
+        assert corrections[0]['delivery'] == 'submitted_to_bridge'
+        assert session.get(VoiceTextCorrection, correction_id).content == 'The correct name is Morgan.'

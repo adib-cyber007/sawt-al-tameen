@@ -9,6 +9,8 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     this.position = 0;
     this.samples = new Int16Array(1200);
     this.sampleCount = 0;
+    this.meterPackets = 0;
+    this.allowBargeIn = configured.allowBargeIn === true;
     this.echoTailSamples = Math.ceil(this.inputRate * (configured.echoTailSeconds ?? 0.35));
     this.holdSamples = 0;
     this.blocked = false;
@@ -21,8 +23,8 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     const gate = inputs[1]?.[0];
     const protectedChannel = new Float32Array(channel.length);
     for (let i = 0; i < channel.length; i += 1) {
-      if (gate?.[i] > 0) this.holdSamples = this.echoTailSamples;
-      const blocked = gate?.[i] > 0 || this.holdSamples > 0;
+      if (!this.allowBargeIn && gate?.[i] > 0) this.holdSamples = this.echoTailSamples;
+      const blocked = !this.allowBargeIn && (gate?.[i] > 0 || this.holdSamples > 0);
       if (blocked !== this.blocked) {
         this.blocked = blocked;
         this.port.postMessage({ type: "capture.state", blocked });
@@ -34,7 +36,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
         }
       }
       protectedChannel[i] = blocked ? 0 : channel[i];
-      if (!(gate?.[i] > 0) && this.holdSamples > 0) this.holdSamples -= 1;
+      if (!this.allowBargeIn && !(gate?.[i] > 0) && this.holdSamples > 0) this.holdSamples -= 1;
     }
     const combined = new Float32Array(this.input.length + channel.length);
     combined.set(this.input);
@@ -47,6 +49,11 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
       const clamped = Math.max(-1, Math.min(1, value));
       this.samples[this.sampleCount++] = Math.round(clamped < 0 ? clamped * 32768 : clamped * 32767);
       if (this.sampleCount === this.samples.length) {
+        if (++this.meterPackets % 10 === 0) {
+          let energy = 0;
+          for (const sample of this.samples) energy += (sample / 32768) ** 2;
+          this.port.postMessage({ type: "capture.level", speech: Math.sqrt(energy / this.samples.length) > 0.015 });
+        }
         this.port.postMessage(this.samples.buffer, [this.samples.buffer]);
         this.samples = new Int16Array(1200);
         this.sampleCount = 0;

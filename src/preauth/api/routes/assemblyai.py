@@ -57,7 +57,8 @@ async def assemblyai_browser(websocket: WebSocket) -> None:
         return
     await websocket.accept()
     await close_after_bridge(
-        websocket, bridge_browser(websocket, settings, websocket.app.state.assemblyai_voice_gateway)
+        websocket, bridge_browser(websocket, settings, websocket.app.state.assemblyai_voice_gateway,
+                                  websocket.app.state.services.voice.record_text_correction)
     )
 
 

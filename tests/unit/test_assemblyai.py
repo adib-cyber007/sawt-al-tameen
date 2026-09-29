@@ -50,8 +50,12 @@ def test_agent_payloads_use_channel_native_audio_and_one_tool_source():
     assert set(agents) == {"browser", "phone"}
     assert agents["browser"]["input"]["format"] == {"encoding": "audio/pcm", "sample_rate": 24000}
     assert agents["phone"]["input"]["format"] == {"encoding": "audio/pcmu", "sample_rate": 8000}
-    assert agents["browser"]["input"]["turn_detection"] == {"interrupt_response": False}
+    assert agents["browser"]["input"]["turn_detection"] == {"interrupt_response": True}
     assert agents["phone"]["input"]["turn_detection"] == {"interrupt_response": True}
+    assert agents["browser"]["input"]["voice_focus"] == "far-field"
+    assert agents["phone"]["input"]["voice_focus"] == "far-field"
+    assert agents["browser"]["input"]["continuous_partials"] is True
+    assert agents["phone"]["input"]["continuous_partials"] is False
     for payload in agents.values():
         assert payload["input"]["type"] == payload["output"]["type"] == "audio"
         assert payload["input"]["format"] == payload["output"]["format"]
@@ -60,7 +64,6 @@ def test_agent_payloads_use_channel_native_audio_and_one_tool_source():
         assert payload["input"]["keyterms"]
         assert payload["input"]["language_codes"] == ["en"]
         assert payload["input"]["transcription_mode"] == "balanced"
-        assert payload["input"]["voice_focus"] == "far-field"
         assert "PRV-30011" in payload["input"]["transcription_prompt"]
         assert "never issue a final approval or denial" in payload["system_prompt"].lower()
 

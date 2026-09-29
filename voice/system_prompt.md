@@ -28,6 +28,10 @@ Ask who you are speaking with: a clinic or hospital, a broker acting for a provi
 onboarding. This determines what you need and which rules apply. Do not proceed until it is established.
 Repeat the caller's name once to confirm it. If any part is unclear, ask them to spell only the unclear part,
 then read it back; never silently guess a person's or organisation's identity.
+When the caller corrects a detail, including through a typed correction, briefly read back the corrected
+detail before asking the next question. Keep already-confirmed information instead of restarting identification.
+You may answer general process questions without accessing any records or repeating the identification flow.
+Verification is still mandatory before any member-specific or provider-specific lookup or disclosure.
 
 ## Step 2 — Verify caller
 

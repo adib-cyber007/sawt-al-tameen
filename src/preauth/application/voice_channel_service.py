@@ -11,13 +11,14 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 
 from preauth.application.unit_of_work import UnitOfWork
 from preauth.domain.actors import SYSTEM_ACTOR
 from preauth.domain.enums import AuditEventType
 from preauth.domain.errors import NotFoundError
 from preauth.infrastructure.clock import Clock, new_id
-from preauth.infrastructure.db.models import CallRecord, VoiceToolInvocation, TwilioMediaAdmission
+from preauth.infrastructure.db.models import CallRecord, VoiceToolInvocation, TwilioMediaAdmission, VoiceTextCorrection
 from preauth.infrastructure import assemblyai_media_token
 from preauth.domain.actors import Actor
 from preauth.infrastructure.observability import actor_var, bind_case_id, conversation_id_var, request_id_var
@@ -79,6 +80,16 @@ class VoiceChannelService:
                 )
             )
             uow.commit()
+
+    def record_text_correction(self, conversation_id: str, content: str) -> str:
+        """Persist before transmission; this records submission, not provider acknowledgement."""
+        if not conversation_id or not content.strip() or len(content) > 1000:
+            raise ValueError("Invalid correction")
+        correction_id = new_id()
+        with self._session_factory.begin() as session:
+            session.add(VoiceTextCorrection(id=correction_id, conversation_id=conversation_id,
+                content=content.strip(), submitted_at=self._clock.now()))
+        return correction_id
 
     def claim_twilio_stream(self, token: str, secret: str, stream_sid: str) -> bool:
         verified = assemblyai_media_token.verify(token, secret)
@@ -205,6 +216,15 @@ class VoiceChannelService:
                     call_record_id=existing.id,
                     linked_case_ids=uow.voice.case_ids_for_conversation(conversation_id),
                 )
+            corrections = uow.session.scalars(select(VoiceTextCorrection).where(
+                VoiceTextCorrection.conversation_id == conversation_id).order_by(VoiceTextCorrection.submitted_at)).all()
+            if corrections:
+                # Provider exports omit conversation.message. Keep submissions as
+                # an explicitly labelled supplement with their original times.
+                transcript = [*transcript, *({"role": "caller", "message": correction.content,
+                    "source": "typed_correction", "delivery": "submitted_to_bridge",
+                    "submitted_at": correction.submitted_at.isoformat(), "correction_id": correction.id}
+                    for correction in corrections)]
             record = CallRecord(
                 id=new_id(),
                 conversation_id=conversation_id,

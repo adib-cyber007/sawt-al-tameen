@@ -22,11 +22,11 @@ check happens after the server receives a complete WebSocket message.
 ## Tool execution and reply delivery
 
 The provider receive loop handles each event without awaiting tool completion. A separate dispatcher sends
-results only at a completed reply boundary for the matching `fc-<call_id>` reply and current turn generation.
+results only at a completed reply boundary for the current turn generation, including a tool call arriving just after that boundary.
 This retains the [AssemblyAI events contract](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference)
 and the asynchronous pattern in its [Twilio example](https://github.com/AssemblyAI-Solutions/voice-agent-api-twilio-example).
 
-Speech start/interrupted replies invalidate pending delivery. Queued work from that generation is skipped;
+Speech start and a new reply pause dispatch without discarding work. Only an explicitly interrupted reply invalidates pending delivery. Queued work from that generation is skipped;
 already-started synchronous work can finish. A 15-second response deadline returns `TOOL_TIMEOUT` with an
 explicit unknown-outcome message. It cannot kill a Python thread or undo a transaction. Later business tools
 stay ordered behind the actual execution, including after timeout. At most 32 executions/results are pending

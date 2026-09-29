@@ -998,3 +998,29 @@ measurements remain pending. No ElevenLabs code path will be used if AssemblyAI 
   health endpoints and the new playback asset returned HTTP 200. A fresh public WebSocket received `session.ready`
   and 405,600 bytes of spoken greeting audio. A human microphone/headphone call, live caller
   recognition, Twilio audio, and an objective before/after listening score remain unverified in this run.
+
+## 2026-09-30 — Browser recovery and live caption follow-up
+
+- User testing was on Brave on a PC using built-in speakers. Updated the browser agent to far-field voice
+  focus, retained microphone capture during replies, and added an explicit Interrupt & speak control.
+- Fixed pending tool delivery being discarded at ordinary speech/reply starts. Only an explicitly interrupted
+  reply now invalidates the pending generation. Session readiness waits for the actual tool-update acknowledgement.
+- Added browser heartbeat, microphone-stall detection, bounded audio backlog, one automatic stalled-reply retry,
+  and visible manual recovery. Playback increases its reserve after underruns without discarding queued samples.
+- Added a separately labelled, metered streaming STT preview. The agent's own transcript remains the source
+  for checking what it heard. Preview cadence is not a measurement of speech-to-text latency, and the two
+  recognizers can disagree. Caption failure is isolated from the voice call.
+- The synthetic fixture originally ended in a 14.5 ms audio fragment, which streaming STT rejected with error
+  3007. The caption bridge now assembles exact 50 ms frames and the soak fixture pads its final packet.
+- Migration 0003 saves typed corrections before transmission and includes labelled supplements in final call
+  records. Live checks confirmed persistence and final-record inclusion. The managed agent did not reliably
+  acknowledge the supplied details despite the updated prompt; typed correction comprehension remains open.
+  UI guidance asks callers to repeat corrections aloud and request readback.
+- Validation: 390 Python tests and 42 JavaScript tests passed; hosted deployment verification passed all 26
+  checks. The public page serves the updated controls. Real Brave microphone/speaker echo, telephone calls,
+  and PostgreSQL execution were not validated in this run. No GitHub push was performed.
+- Public synthetic-audio soak passed for 531 seconds with nine spoken turns after the greeting, 337 caption
+  updates, one correction submission, and no session/caption failure or reconnection. Median changed-preview
+  interval within a recognition turn was 276 ms; this is update cadence, not end-to-end recognition latency.
+  Provider session: `sess_12b21cde3b8b4e9cb91f81274bb0369e`. This transport test does not establish acoustic
+  accuracy, typed-correction comprehension, or immunity to longer-running provider/network failures.

@@ -55,6 +55,7 @@ class Settings:
     assemblyai_voice_id: str | None = None
     assemblyai_api_base: str = "https://agents.assemblyai.com"
     assemblyai_ws_url: str = "wss://agents.assemblyai.com/v1/ws"
+    assemblyai_live_captions: bool = False
     # The https:// address Twilio is configured with; Twilio signs that URL, not the one behind the tunnel.
     public_base_url: str | None = None
 
@@ -86,6 +87,7 @@ class Settings:
                 _optional("PREAUTH_ASSEMBLYAI_API_BASE") or cls.assemblyai_api_base
             ).rstrip("/"),
             assemblyai_ws_url=_optional("PREAUTH_ASSEMBLYAI_WS_URL") or cls.assemblyai_ws_url,
+            assemblyai_live_captions=os.getenv("PREAUTH_ASSEMBLYAI_LIVE_CAPTIONS", "false").lower() == "true",
             public_base_url=(_optional("PREAUTH_PUBLIC_BASE_URL") or "").rstrip("/") or None,
         )
 

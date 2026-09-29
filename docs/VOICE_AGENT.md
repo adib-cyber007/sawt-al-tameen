@@ -85,28 +85,51 @@ https://<public-base-url>/voice
 
 The page captures mono audio at the device's native rate, keeps browser acoustic echo cancellation enabled,
 resamples it to signed PCM16 at 24 kHz in an AudioWorklet, and streams it through the backend. A separate playback
-AudioWorklet resamples the provider's 24 kHz PCM packets to the device rate. Playback starts when three seconds
-of speech are available, when a shorter reply completes, or after five seconds of buffering with available audio.
-This reserve absorbs the two-second delivery gaps measured in live greetings without waiting for the entire
-reply. The five-second limit starts when the reply reaches the front of the playback queue; it cannot bound
-provider generation time before the first audio packet. Delivery slower than playback can still cause a stall.
-The page displays **Preparing the reply** during buffering. Separate reply queues preserve reply boundaries,
-including when a later reply arrives before the previous one finishes playing. Natural speech pauses are retained.
-Browser calls use speaker-safe turn taking: a separate playback control output gates microphone capture
-on the audio render thread throughout each reply, including network gaps, until the final queued sample plays.
-Capture then sends silence for another 350 ms plus reported device output latency to cover residual speaker
-echo. Browser echo cancellation and noise suppression are both requested. Wait for the displayed **Listening**
-status before speaking; voice interruption during an assistant reply is disabled in both the browser and the
-provider configuration for this mode. The browser requests playback-oriented hardware latency to reduce
-Brave/Chromium audio glitches under load.
+AudioWorklet resamples the provider's 24 kHz PCM packets to the device rate. Playback starts with 750 ms of speech,
+when a shorter reply completes, or after 1.25 seconds with available audio. After network starvation it waits for
+an adaptive 500–1000 ms reserve before continuing, with up to 1.5 seconds of starting reserve on later replies. This cuts added playback latency but a multi-second provider delivery gap can
+still produce an audible pause. The page displays **Preparing the reply** during buffering. Separate reply queues
+preserve reply boundaries, including when a later reply arrives before the previous one finishes playing.
+Browser calls keep the microphone streaming through replies so AssemblyAI's semantic interruption detector can
+hear an actual interruption; interrupted replies clear queued playback. Browser echo cancellation stays enabled,
+while browser noise suppression is disabled to avoid stacking it with AssemblyAI Voice Focus. Headphones are
+recommended where speaker echo causes false interruptions. Browser sessions use far-field Voice Focus for PC speakers and built-in microphones, balanced transcription to preserve identifier accuracy, and continuous partials for
+steadier captions during long caller turns.
+The browser requests playback-oriented hardware latency to reduce Brave/Chromium audio glitches under load.
 The local recording console pauses assistant playback before recording and prevents playback during recording.
 Microphone permission failures, missing devices and devices in use show actionable errors. Muted or disconnected
 tracks no longer appear as listening. If the browser interrupts audio, use **Resume audio**; if the microphone
 disconnects, reconnect it and start a new call. **End call** also cancels startup while permission is pending.
 Use the HTTPS site address when testing from a phone; a plain HTTP LAN address cannot access the microphone.
-The page also displays transcript events. Browser
-noise suppression is disabled because AssemblyAI Voice Focus already performs that job; stacking both degrades
-recognition. The backend starts the stored browser agent only after the browser WebSocket is accepted.
+The page displays partial user transcript events and word-level agent transcript deltas as the provider emits
+them, then replaces each provisional turn with the final transcript. The backend starts the stored browser agent
+only after the browser WebSocket is accepted. Microphone forwarding begins after the stored session is ready and the subsequent tool update is acknowledged; the initial `session.updated` event is not sufficient.
+
+### Live preview, corrections and recovery
+
+Set `PREAUTH_ASSEMBLYAI_LIVE_CAPTIONS=true` to enable the separate word-level preview. It uses AssemblyAI
+Universal Streaming English at 24 kHz with raw-key authentication on the server. This adds one metered STT
+connection per browser call. Packets are assembled into 50 ms frames, including short input fragments. It is terminated when the call ends. The API key never reaches the browser.
+The five-second bounded queue and up to three connection attempts isolate caption congestion/failure from
+voice-agent audio. An unavailable preview falls back visibly to the agent's own transcript.
+
+**Live word preview is a second recognizer**, not the input the agent used. The conversation transcript remains
+AssemblyAI Voice Agent's authoritative output, reconciled by item ID even if final events arrive late. There is
+no artificial typing animation. Some updates contain several words; exact word emission latency depends on the
+recognizer and network. The managed agent's native partials arrived about every 1–2 seconds in the synthetic test.
+
+**Send correction** injects a bounded user message into the same provider session and requests a reply. The
+browser cannot supply a system role or tool result. Migration `0003` saves submissions in append-only `voice_text_corrections` before transmission, because provider timelines omit injected user messages. Final call records include a separately labelled, timestamped correction supplement; submission is not claimed to be provider acknowledgement. It displays the correction only after the bridge sends it.
+
+Live testing on 2026-09-30 confirmed saving and delivery but did not confirm that the managed agent uses the injected correction: it requested caller details already supplied in the text. The UI therefore asks callers to interrupt, repeat the detail aloud, and request readback if no acknowledgement follows. Typed correction comprehension remains an open provider integration issue.
+**Interrupt & speak** immediately clears and mutes the current local reply while keeping microphone capture
+active; a new reply can play normally. The underlying semantic interruption detector stays enabled.
+
+The browser checks its connection every five seconds, detects missing microphone packets, bounds its audio-send
+backlog, and shows upstream reconnection. After 20 seconds without reply progress, when the caller and playback
+are quiet, it requests one recovery reply in the same session. Further retry is explicit. A dead connection
+shows an actionable error and releases the microphone rather than displaying Listening forever. These controls
+do not promise to repair every provider failure or eliminate acoustic echo on every PC.
 
 ## Twilio calls
 
@@ -136,6 +159,8 @@ AssemblyAI function calls execute in the backend through the existing `VoiceTool
 AssemblyAI `session_id`. Calls run in order without blocking the provider audio receive loop. Tool results are
 sent only after the associated reply completes; interrupted replies do
 not leak stale results into a later turn. No function exists that can approve, deny, or finalise a case.
+The bridge releases tool results after a clean `reply.done` boundary without inferring a reply id from a tool
+call id. It also accepts older normal `reply.done` events that omit `status`.
 
 That same `session_id` is written to every tool invocation. It later becomes the call-record conversation id, so
 a reviewer sees `CALL_RECORD_PENDING` until the exact session transcript is durable.

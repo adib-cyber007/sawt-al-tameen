@@ -1,5 +1,4 @@
-// Keep three seconds of speech ahead of playback to absorb measured two-second
-// delivery gaps. Cap the initial buffering wait at five seconds once audio arrives.
+// Start promptly, then keep a small reserve when a streamed reply underruns.
 class PcmPlaybackProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
@@ -8,15 +7,16 @@ class PcmPlaybackProcessor extends AudioWorkletProcessor {
     this.replies = [];
     this.receiving = null;
     this.state = "idle";
-    this.startSamples = Math.round(this.inputRate * 3);
-    this.maxWaitFrames = Math.round(sampleRate * 5);
+    this.startSamples = Math.round(this.inputRate * 0.75);
+    this.resumeSamples = Math.round(this.inputRate * 0.25);
+    this.maxWaitFrames = Math.round(sampleRate * 1.25);
     this.port.onmessage = ({ data }) => {
       if (data.type === "audio") {
         const samples = new Int16Array(data.samples);
         if (!samples.length) return;
         if (!this.receiving) {
           this.receiving = { chunks: [], head: 0, offset: 0, phase: 0, buffered: 0,
-            complete: false, playing: false, waitFrames: 0 };
+            complete: false, playing: false, started: false, waitFrames: 0 };
           this.replies.push(this.receiving);
         }
         this.receiving.chunks.push(samples);
@@ -76,9 +76,10 @@ class PcmPlaybackProcessor extends AudioWorkletProcessor {
         continue;
       }
       if (!reply.playing) {
-        if (reply.buffered && (reply.complete || reply.buffered >= this.startSamples
+        if (reply.buffered && (reply.complete || reply.buffered >= (reply.started ? this.resumeSamples : this.startSamples)
             || reply.waitFrames >= this.maxWaitFrames)) {
           reply.playing = true;
+          reply.started = true;
           reply.waitFrames = 0;
         } else {
           reply.waitFrames += 1;
@@ -96,7 +97,13 @@ class PcmPlaybackProcessor extends AudioWorkletProcessor {
       }
       if (!reply.buffered) {
         if (reply.complete) this.replies.shift();
-        else reply.playing = false;
+        else {
+          reply.playing = false;
+          // A demonstrated underrun needs more reserve than a healthy stream.
+          // Adapt later replies too, rather than repeating tiny start/stop bursts.
+          this.resumeSamples = Math.min(this.inputRate, this.resumeSamples + this.inputRate * 0.25);
+          this.startSamples = Math.min(this.inputRate * 1.5, this.startSamples + this.inputRate * 0.25);
+        }
       }
     }
     const head = this.replies[0];

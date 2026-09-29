@@ -15,7 +15,7 @@ for (const rate of [16000, 24000, 44100, 48000, 96000]) {
     vm.runInNewContext(worklet, {
       sampleRate: rate,
       AudioWorkletProcessor: class {
-        port = { postMessage: buffer => chunks.push(new Int16Array(buffer)) };
+        port = { postMessage: buffer => { if (!buffer.type) chunks.push(new Int16Array(buffer)); } };
       },
       registerProcessor: (_, implementation) => { Processor = implementation; },
     });
@@ -60,12 +60,12 @@ function playback(rate) {
   return { processor, send, render };
 }
 
-test('playback buffers short packets and produces continuous output at device rate', () => {
+test('playback starts with under a second of audio without waiting for reply.done', () => {
   const { send, render } = playback(48000);
   for (let i = 0; i < 74; i++) send('audio', new Int16Array(240).fill(16384));
   assert.ok(render(128).every(value => value === 0));
   send('audio', new Int16Array(240).fill(16384));
-  assert.ok(render(48000).every(value => value === 0), 'do not start an incomplete reply');
+  assert.ok(render(128).every(value => value === 0.5), 'play before the provider finishes the reply');
   send('flush');
   const output = render(128);
   assert.ok(output.every(value => value === 0.5));
@@ -98,13 +98,12 @@ test('clearing playback discards completed and incomplete replies', () => {
   assert.ok(render(128).every(value => value === -0.5));
 });
 
-test('a second incomplete reply cannot undo the first reply completion or start early', () => {
+test('a second incomplete reply keeps its own boundary', () => {
   const { processor, send, render } = playback(24000);
   send('audio', new Int16Array(2400).fill(16384));
   send('flush');
   send('audio', new Int16Array(2400).fill(-16384));
   assert.ok(render(2400).every(value => value === 0.5));
-  assert.ok(render(48000).every(value => value === 0));
   assert.equal(processor.state, 'buffering');
   send('audio', new Int16Array(2400).fill(-16384));
   send('flush');
@@ -116,6 +115,7 @@ test('a second incomplete reply cannot undo the first reply completion or start 
 function browser() {
   const elements = new Map();
   const context = vm.createContext({
+    setInterval: () => 1, clearInterval() {},
     document: { querySelector: selector => {
       if (!elements.has(selector)) elements.set(selector, {
         classList: { toggle() {}, remove() {} }, addEventListener() {},
@@ -129,7 +129,7 @@ function browser() {
 }
 
 for (const rate of [24000, 44100, 48000, 96000]) {
-  test(`replies have no inserted pauses despite a 2.1 second delivery stall at ${rate} Hz`, () => {
+  test(`a 2.1 second delivery stall retains every sample at ${rate} Hz`, () => {
     const { processor, send, render } = playback(rate);
     // A completed short greeting must not leave the next reply in the old
     // 20 ms resume mode, which made it start and stop on individual bursts.
@@ -152,14 +152,15 @@ for (const rate of [24000, 44100, 48000, 96000]) {
     }
     const first = received.findIndex(value => value !== 0);
     const last = received.findLastIndex(value => value !== 0);
-    assert.ok(first >= Math.floor(rate * arrival.at(-1)), 'wait until the complete reply is available');
-    assert.ok(received.slice(first, last + 1).every(value => value === 0.5), 'no gaps within the spoken reply');
-    assert.ok(Math.abs(last - first + 1 - rate * 2) <= 1, 'preserve all two seconds of speech');
+    assert.ok(first < rate * 1.2, 'start speaking promptly');
+    assert.ok(last > first);
+    assert.ok(Math.abs(received.filter(value => value !== 0).length - rate * 2) <= 1,
+      'preserve all two seconds of speech despite a network gap');
     assert.equal(processor.buffered, 0);
   });
 }
 
-test('long replies start with a three-second reserve and remain continuous across a 2.1 second stall', () => {
+test('long replies start promptly and retain all audio across a 2.1 second stall', () => {
   const { send, render, processor } = playback(48000);
   const received = [];
   let packet = 0;
@@ -173,17 +174,18 @@ test('long replies start with a three-second reserve and remain continuous acros
   }
   const first = received.findIndex(value => value !== 0);
   const last = received.findLastIndex(value => value !== 0);
-  assert.ok(first / 48000 >= 2.9 && first / 48000 < 3.1, 'start before the whole reply arrives');
-  assert.equal(last - first + 1, 48000 * 8);
-  assert.ok(received.slice(first, last + 1).every(value => value === 0.5), 'no mid-sentence gaps');
+  assert.ok(first / 48000 >= 0.7 && first / 48000 < 1.0, 'start after a small reserve');
+  assert.ok(last > first);
+  assert.equal(received.filter(value => value !== 0).length, 48000 * 8);
   assert.equal(processor.replyActive, false);
 });
 
-test('slow deliveries start available speech after five seconds and retain the same reply after starvation', () => {
+test('slow deliveries start available speech within 1.25 seconds and retain the reply', () => {
   const { send, render, processor } = playback(24000);
   send('audio', new Int16Array(2400).fill(16384));
-  assert.ok(render(24000 * 5).every(value => value === 0));
-  assert.ok(render(2400).every(value => value === 0.5));
+  const first = render(24000 * 1.5);
+  assert.ok(first.slice(0, 24000).every(value => value === 0));
+  assert.ok(first.some(value => value === 0.5));
   assert.equal(processor.replyActive, true, 'an unfinished streamed reply must retain its boundary');
   send('audio', new Int16Array(2400).fill(-16384));
   send('flush');
@@ -263,6 +265,24 @@ for (const rate of [16000, 24000, 44100, 48000, 96000]) {
   });
 }
 
+test('barge-in capture streams caller audio while the speaker gate is active', () => {
+  let Capture;
+  const chunks = [];
+  vm.runInNewContext(worklet, {
+    sampleRate: 24000,
+    AudioWorkletProcessor: class { port = { postMessage: data => {
+      if (data?.type !== 'capture.state') chunks.push(new Int16Array(data));
+    } }; },
+    registerProcessor: (_, implementation) => { Capture = implementation; },
+  });
+  const capture = new Capture({ processorOptions: { inputSampleRate: 24000, allowBargeIn: true } });
+  for (let i = 0; i < 10; i++) {
+    capture.process([[new Float32Array(128).fill(0.5)], [new Float32Array(128).fill(1)]]);
+  }
+  assert.equal(capture.blocked, false);
+  assert.ok(chunks.some(chunk => chunk.some(value => value > 10000)));
+});
+
 function liveBrowser() {
   const { context, elements } = browser();
   const nodes = [];
@@ -307,31 +327,55 @@ function liveBrowser() {
   return { context, elements, nodes, track, stream, constraints: () => constraints };
 }
 
-test('browser wires the inaudible playback gate to capture and ignores false speech interruptions', async () => {
+test('browser keeps the microphone live during replies and clears interrupted speech', async () => {
   const { context, elements, nodes, constraints } = liveBrowser();
   await vm.runInContext('startCall()', context);
   const [player, capture] = nodes;
   assert.equal(constraints().audio.echoCancellation, true);
-  assert.equal(constraints().audio.noiseSuppression, true);
+  assert.equal(constraints().audio.noiseSuppression, false);
   assert.equal(player.options.numberOfOutputs, 2);
   assert.equal(capture.options.numberOfInputs, 2);
   assert.deepEqual(player.connections[1], [capture, 1, 1]);
-  assert.ok(Math.abs(capture.options.processorOptions.echoTailSeconds - 0.4) < 0.001);
+  assert.equal(capture.options.processorOptions.allowBargeIn, true);
   context.liveSocket.onmessage({ data: JSON.stringify({ type: 'session.ready' }) });
   player.port.onmessage({ data: { type: 'playback.state', state: 'buffering' } });
   assert.match(elements.get('#status').textContent, /Preparing the reply/);
   capture.port.onmessage({ data: { type: 'capture.state', blocked: true } });
   assert.match(elements.get('#status').textContent, /Preparing the reply/);
   player.port.onmessage({ data: { type: 'playback.state', state: 'speaking' } });
-  assert.match(elements.get('#status').textContent, /Assistant speaking/);
+  assert.match(elements.get('#status').textContent, /speak to interrupt/);
   context.liveSocket.onmessage({ data: JSON.stringify({ type: 'input.speech.started' }) });
   assert.equal(player.messages.length, 0, 'false VAD event must not cut off the assistant');
   context.liveSocket.onmessage({ data: JSON.stringify({ type: 'reply.done' }) });
   assert.equal(player.messages[0].type, 'flush');
-  assert.match(elements.get('#status').textContent, /Assistant speaking/);
+  context.liveSocket.onmessage({ data: JSON.stringify({ type: 'reply.done', status: 'interrupted' }) });
+  assert.equal(player.messages[1].type, 'clear');
+  assert.match(elements.get('#status').textContent, /speak to interrupt/);
   capture.port.onmessage({ data: { type: 'capture.state', blocked: false } });
   player.port.onmessage({ data: { type: 'playback.state', state: 'idle' } });
   assert.match(elements.get('#status').textContent, /Listening/);
+});
+
+test('browser renders streaming assistant words before the final transcript', async () => {
+  const { context, elements } = liveBrowser();
+  const turns = [];
+  const transcript = elements.get('#transcript');
+  transcript.querySelector = () => null;
+  transcript.append = turn => turns.push(turn);
+  context.document.createElement = () => ({
+    children: [], classList: { remove() {} },
+    append(...children) { this.children.push(...children); },
+    querySelector(selector) { return this.children.find(child => child.className === selector.slice(1)); },
+  });
+  await vm.runInContext('startCall()', context);
+  context.liveSocket.onmessage({ data: JSON.stringify({ type: 'session.ready' }) });
+  context.liveSocket.onmessage({ data: JSON.stringify({ type: 'transcript.agent.delta', reply_id: 'r1', delta: 'Hello' }) });
+  context.liveSocket.onmessage({ data: JSON.stringify({ type: 'transcript.agent.delta', reply_id: 'r1', delta: 'there' }) });
+  assert.equal(turns[0].querySelector('.content').textContent, 'Hello there');
+  context.liveSocket.onmessage({ data: JSON.stringify({ type: 'transcript.user.delta', text: 'Wait' }) });
+  context.liveSocket.onmessage({ data: JSON.stringify({ type: 'transcript.agent', reply_id: 'r1', text: 'Hello there.' }) });
+  assert.equal(turns[0].querySelector('.content').textContent, 'Hello there.');
+  assert.equal(turns[1].querySelector('.content').textContent, 'Wait');
 });
 
 test('ending during permission request releases the late microphone without starting a connection', async () => {
@@ -506,3 +550,86 @@ for (const failure of ['constructor', 'start', 'error']) {
     assert.equal(vm.runInContext('recorder', context), null);
   });
 }
+
+function transcriptDom(context, elements) {
+  const turns = [];
+  elements.get('#transcript').querySelector = () => null;
+  elements.get('#transcript').append = turn => turns.push(turn);
+  context.document.createElement = () => ({
+    children: [], classList: { remove() {} },
+    append(...children) { this.children.push(...children); },
+    querySelector(selector) { return this.children.find(child => child.className === selector.slice(1)); },
+  });
+  return turns;
+}
+
+test('interleaved captions reconcile by item without overwriting another utterance', async () => {
+  const { context, elements } = liveBrowser();
+  const turns = transcriptDom(context, elements);
+  await vm.runInContext('startCall()', context);
+  const receive = event => context.liveSocket.onmessage({ data: JSON.stringify(event) });
+  receive({ type: 'transcript.user.delta', item_id: 'a', text: 'my name' });
+  receive({ type: 'transcript.user.delta', item_id: 'b', text: 'the clinic' });
+  receive({ type: 'transcript.user', item_id: 'a', text: 'My name is Alex.' });
+  receive({ type: 'caption.preview', text: 'the clinic is called' });
+  assert.equal(turns.length, 2);
+  assert.equal(turns[0].querySelector('.content').textContent, 'My name is Alex.');
+  assert.equal(turns[1].querySelector('.content').textContent, 'the clinic');
+  assert.equal(elements.get('#word-preview').textContent, 'the clinic is called');
+  assert.equal(turns.length, 2, 'independent preview never overwrites the agent transcript');
+});
+
+test('silent stalled reply requests recovery once while a normal idle call does not', async () => {
+  const { context, elements, nodes } = liveBrowser();
+  let now = 100000;
+  context.Date = class extends Date { static now() { return now; } };
+  await vm.runInContext('startCall()', context);
+  const sent = [];
+  context.liveSocket.send = message => sent.push(JSON.parse(message));
+  context.liveSocket.onopen();
+  const receive = event => context.liveSocket.onmessage({ data: JSON.stringify(event) });
+  receive({ type: 'session.ready' });
+  function check() {
+    receive({ type: 'connection.pong' });
+    nodes[1].port.onmessage({ data: { type: 'capture.level', speech: false } });
+    vm.runInContext('checkCallHealth()', context);
+  }
+  now += 30000; check();
+  assert.equal(sent.filter(e => e.type === 'reply.retry').length, 0);
+  receive({ type: 'input.speech.stopped' });
+  now += 21000; check();
+  assert.equal(sent.filter(e => e.type === 'reply.retry').length, 1);
+  now += 21000; check();
+  assert.equal(sent.filter(e => e.type === 'reply.retry').length, 1);
+  assert.equal(elements.get('#retry').hidden, false);
+  assert.equal(elements.get('#retry').disabled, false);
+});
+
+test('typed correction waits for server acknowledgement and keeps original transcript', async () => {
+  const { context, elements } = liveBrowser();
+  const turns = transcriptDom(context, elements);
+  await vm.runInContext('startCall()', context);
+  context.liveSocket.onmessage({ data: '{"type":"session.ready"}' });
+  const sent = [];
+  context.liveSocket.send = message => sent.push(JSON.parse(message));
+  elements.get('#correction').value = 'My name is Alex';
+  vm.runInContext('sendCorrection({ preventDefault() {} })', context);
+  assert.equal(turns.length, 0);
+  assert.equal(sent[0].type, 'conversation.correction');
+  assert.equal(elements.get('#correction-send').disabled, true);
+  context.liveSocket.onmessage({ data: '{"type":"correction.accepted","text":"My name is Alex"}' });
+  assert.equal(turns[0].querySelector('.content').textContent, 'Correction: My name is Alex');
+  assert.equal(elements.get('#correction').value, '');
+});
+
+test('connection heartbeat loss ends visibly and releases microphone', async () => {
+  const { context, elements, track } = liveBrowser();
+  let now = 100000;
+  context.Date = class extends Date { static now() { return now; } };
+  await vm.runInContext('startCall()', context);
+  context.liveSocket.onopen();
+  now += 26000;
+  vm.runInContext('checkCallHealth()', context);
+  assert.match(elements.get('#status').textContent, /connection stopped responding/);
+  assert.equal(track.readyState, 'ended');
+});

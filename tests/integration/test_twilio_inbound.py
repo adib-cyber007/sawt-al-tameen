@@ -165,7 +165,7 @@ def test_assemblyai_browser_console_is_served_without_exposing_the_api_key(servi
     assert script.status_code == 200 and "input.audio" in script.text
     assert 'new AudioContext({ latencyHint: "playback" })' in script.text
     assert "targetSampleRate: 24000" in script.text
-    assert "noiseSuppression: true" in script.text
+    assert "noiseSuppression: false" in script.text
     assert worklet.status_code == 200 and "this.ratio" in worklet.text
     assert "must-not-be-in-html" not in page.text + script.text + worklet.text
 

@@ -98,8 +98,10 @@ def agent_payload(
             "format": {"encoding": encoding, "sample_rate": sample_rate},
             "keyterms": keyterms(),
             "transcription_mode": "balanced",
+            "continuous_partials": encoding == "audio/pcm",
             "transcription_prompt": TRANSCRIPTION_PROMPT,
             "language_codes": ["en"],
+            # Browser testing uses built-in PC microphones/speakers, not a headset.
             "voice_focus": "far-field",
             "voice_focus_threshold": 0.85,
             "turn_detection": {"interrupt_response": interrupt_response},
@@ -126,9 +128,9 @@ def desired_agents(*, voice_id: str) -> dict[str, dict[str, Any]]:
             voice_id=voice_id,
             encoding="audio/pcm",
             sample_rate=24000,
-            # Browser speaker output can leak into its microphone even with
-            # acoustic echo cancellation. Browser calls use half-duplex turns.
-            interrupt_response=False,
+            # Browser acoustic echo cancellation plus Voice Focus allow the
+            # provider's semantic interruption detector to hear the caller.
+            interrupt_response=True,
         ),
         "phone": agent_payload(
             name="Sawt Assurance - Phone Pre-Authorisation",
