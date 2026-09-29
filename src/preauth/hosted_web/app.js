@@ -10,7 +10,6 @@ const correctionSend = document.querySelector("#correction-send");
 const correctionStatus = document.querySelector("#correction-status");
 const interruptButton = document.querySelector("#interrupt");
 const retryButton = document.querySelector("#retry");
-const wordPreview = document.querySelector("#word-preview");
 
 let socket;
 let audioContext;
@@ -19,6 +18,7 @@ let captureNode;
 let playbackNode;
 let ready = false;
 const partialTurns = { caller: undefined, agent: undefined };
+const partialTurnIds = { caller: undefined, agent: undefined };
 let agentPartialReplyId;
 let agentPartialText = "";
 let terminalError = false;
@@ -103,12 +103,21 @@ function base64(buffer) {
 function appendTurn(role, text, partial = false, itemId) {
   transcript.querySelector(".empty")?.remove();
   const key = itemId ? `${role}:${itemId}` : undefined;
-  const existing = key ? transcriptItems.get(key) : partialTurns[role];
+  // Voice Agent partials can omit item_id even when the final event has one.
+  // Reconcile that final event into the visible partial rather than adding a late duplicate.
+  const unkeyedPartial = partialTurns[role] && partialTurnIds[role] === undefined
+    ? partialTurns[role] : undefined;
+  const existing = key ? transcriptItems.get(key) || (!partial ? unkeyedPartial : undefined)
+    : partialTurns[role];
   if (existing) {
+    if (key && !transcriptItems.has(key)) transcriptItems.set(key, existing);
     existing.querySelector(".content").textContent = text;
     if (!partial) {
       existing.classList.remove("partial");
-      if (partialTurns[role] === existing) partialTurns[role] = undefined;
+      if (partialTurns[role] === existing) {
+        partialTurns[role] = undefined;
+        partialTurnIds[role] = undefined;
+      }
     }
     transcript.scrollTop = transcript.scrollHeight;
     return;
@@ -126,7 +135,10 @@ function appendTurn(role, text, partial = false, itemId) {
   if (key) transcriptItems.set(key, turn);
   // Bound the lookup cache; older rendered transcript rows remain readable.
   if (transcriptItems.size > 500) transcriptItems.delete(transcriptItems.keys().next().value);
-  if (partial) partialTurns[role] = turn;
+  if (partial) {
+    partialTurns[role] = turn;
+    partialTurnIds[role] = itemId;
+  }
   transcript.scrollTop = transcript.scrollHeight;
 }
 
@@ -215,7 +227,6 @@ async function startCall() {
   startButton.disabled = true;
   endButton.disabled = false;
   terminalError = false;
-  wordPreview.textContent = "Connecting live captions…";
   setStatus("Allow microphone access to start your call.");
   try {
     if (globalThis.isSecureContext === false) {
@@ -328,14 +339,6 @@ async function startCall() {
         connection.classList.add("live");
         endButton.disabled = false;
         updateAudioStatus();
-      } else if (event.type === "caption.ready") {
-        wordPreview.textContent = "Listening for your words…";
-      } else if (event.type === "caption.preview") {
-        wordPreview.textContent = event.text;
-      } else if (event.type === "caption.unavailable") {
-        wordPreview.textContent = "Fast preview is unavailable. The assistant’s own captions continue below.";
-      } else if (event.type === "caption.reconnecting") {
-        wordPreview.textContent = "Reconnecting fast captions. The conversation continues below.";
       } else if (event.type === "connection.pong") {
         lastPong = Date.now();
       } else if (event.type === "connection.reconnecting") {
@@ -453,6 +456,7 @@ async function stopCall(sendEnd = true, preserveStatus = false) {
   clearPlayback();
   captureNode = playbackNode = microphoneStream = audioContext = undefined;
   partialTurns.caller = partialTurns.agent = undefined;
+  partialTurnIds.caller = partialTurnIds.agent = undefined;
   agentPartialReplyId = undefined;
   agentPartialText = "";
   connection.textContent = "Not connected";

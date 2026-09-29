@@ -563,7 +563,7 @@ function transcriptDom(context, elements) {
   return turns;
 }
 
-test('interleaved captions reconcile by item without overwriting another utterance', async () => {
+test('interleaved caller captions reconcile by item without overwriting another utterance', async () => {
   const { context, elements } = liveBrowser();
   const turns = transcriptDom(context, elements);
   await vm.runInContext('startCall()', context);
@@ -571,12 +571,31 @@ test('interleaved captions reconcile by item without overwriting another utteran
   receive({ type: 'transcript.user.delta', item_id: 'a', text: 'my name' });
   receive({ type: 'transcript.user.delta', item_id: 'b', text: 'the clinic' });
   receive({ type: 'transcript.user', item_id: 'a', text: 'My name is Alex.' });
-  receive({ type: 'caption.preview', text: 'the clinic is called' });
   assert.equal(turns.length, 2);
   assert.equal(turns[0].querySelector('.content').textContent, 'My name is Alex.');
   assert.equal(turns[1].querySelector('.content').textContent, 'the clinic');
-  assert.equal(elements.get('#word-preview').textContent, 'the clinic is called');
-  assert.equal(turns.length, 2, 'independent preview never overwrites the agent transcript');
+  receive({ type: 'transcript.user', item_id: 'b', text: 'The clinic is called Mercy.' });
+  assert.equal(turns[1].querySelector('.content').textContent, 'The clinic is called Mercy.');
+  assert.equal(turns.length, 2);
+});
+
+test('caller words appear on each native partial and the keyed final updates the same message', async () => {
+  const { context, elements } = liveBrowser();
+  const turns = transcriptDom(context, elements);
+  await vm.runInContext('startCall()', context);
+  const receive = event => context.liveSocket.onmessage({ data: JSON.stringify(event) });
+  receive({ type: 'transcript.user.delta', text: 'My' });
+  assert.equal(turns[0].querySelector('.content').textContent, 'My');
+  receive({ type: 'transcript.user.delta', text: 'My name is Alex' });
+  assert.equal(turns[0].querySelector('.content').textContent, 'My name is Alex');
+  receive({ type: 'transcript.user', item_id: 'caller-1', text: 'My name is Alex.' });
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].querySelector('.content').textContent, 'My name is Alex.');
+  receive({ type: 'transcript.user.delta', text: 'I work' });
+  assert.equal(turns.length, 2);
+  receive({ type: 'transcript.user', item_id: 'caller-2', text: 'I work at a clinic.' });
+  assert.equal(turns.length, 2);
+  assert.equal(turns[1].querySelector('.content').textContent, 'I work at a clinic.');
 });
 
 test('silent stalled reply requests recovery once while a normal idle call does not', async () => {

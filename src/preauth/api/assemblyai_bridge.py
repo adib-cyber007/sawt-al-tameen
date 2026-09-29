@@ -20,7 +20,6 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 from preauth.agent_tools.assemblyai import all_function_tool_configs
 from preauth.agent_tools.voice_gateway import VoiceToolGateway
 from preauth.infrastructure.settings import Settings
-from preauth.api.live_captions import LiveCaptions
 
 logger = logging.getLogger("preauth.voice.assemblyai.bridge")
 RESUME_WINDOW_SECONDS = 30
@@ -291,7 +290,6 @@ async def bridge_browser(websocket: WebSocket, settings: Settings, gateway: Voic
                          record_correction: Callable[[str, str], str] | None = None) -> None:
     coordinator = AssemblyAIToolCoordinator(gateway)
     client_active = True
-    captions = LiveCaptions(settings.assemblyai_api_key, websocket.send_json) if settings.assemblyai_live_captions else None
 
     async def connect_once(resume_session_id: str | None) -> None:
         nonlocal client_active
@@ -326,8 +324,6 @@ async def bridge_browser(websocket: WebSocket, settings: Settings, gateway: Voic
                         event_type = event.get("type") if isinstance(event, dict) else None
                         if event_type == "input.audio" and isinstance(event.get("audio"), str):
                             await ready.wait()
-                            if captions:
-                                captions.feed(event["audio"])
                             await _send_provider(provider, {"type": "input.audio", "audio": event["audio"]})
                         elif event_type == "connection.ping":
                             await websocket.send_json({"type": "connection.pong"})
@@ -425,13 +421,9 @@ async def bridge_browser(websocket: WebSocket, settings: Settings, gateway: Voic
             finally:
                 coordinator.disconnected()
 
-    caption_task = asyncio.create_task(captions.run()) if captions else None
     try:
         await _run_resumable(coordinator, connect_once)
     finally:
-        if caption_task:
-            caption_task.cancel()
-            await asyncio.gather(caption_task, return_exceptions=True)
         await coordinator.close()
     if not client_active:
         return

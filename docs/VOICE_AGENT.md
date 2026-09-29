@@ -105,18 +105,14 @@ The page displays partial user transcript events and word-level agent transcript
 them, then replaces each provisional turn with the final transcript. The backend starts the stored browser agent
 only after the browser WebSocket is accepted. Microphone forwarding begins after the stored session is ready and the subsequent tool update is acknowledged; the initial `session.updated` event is not sufficient.
 
-### Live preview, corrections and recovery
+### Conversation captions, corrections and recovery
 
-Set `PREAUTH_ASSEMBLYAI_LIVE_CAPTIONS=true` to enable the separate word-level preview. It uses AssemblyAI
-Universal Streaming English at 24 kHz with raw-key authentication on the server. This adds one metered STT
-connection per browser call. Packets are assembled into 50 ms frames, including short input fragments. It is terminated when the call ends. The API key never reaches the browser.
-The five-second bounded queue and up to three connection attempts isolate caption congestion/failure from
-voice-agent audio. An unavailable preview falls back visibly to the agent's own transcript.
-
-**Live word preview is a second recognizer**, not the input the agent used. The conversation transcript remains
-AssemblyAI Voice Agent's authoritative output, reconciled by item ID even if final events arrive late. There is
-no artificial typing animation. Some updates contain several words; exact word emission latency depends on the
-recognizer and network. The managed agent's native partials arrived about every 1–2 seconds in the synthetic test.
+The browser shows the Voice Agent's `transcript.user.delta` events directly in the conversation as they arrive,
+then replaces that same provisional row with its `transcript.user` final. A partial without an item ID is matched
+to the later final with an item ID; interleaved keyed turns remain separate. There is no second recognizer or
+artificial typing animation. The stored browser agent enables `continuous_partials` and uses the balanced
+transcription mode to preserve recognition quality for names and insurance identifiers. AssemblyAI controls
+the timing and grouping of partial updates; some updates contain several words.
 
 **Send correction** injects a bounded user message into the same provider session and requests a reply. The
 browser cannot supply a system role or tool result. Migration `0003` saves submissions in append-only `voice_text_corrections` before transmission, because provider timelines omit injected user messages. Final call records include a separately labelled, timestamped correction supplement; submission is not claimed to be provider acknowledgement. It displays the correction only after the bridge sends it.

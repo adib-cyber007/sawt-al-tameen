@@ -123,6 +123,3 @@ button:disabled { background: var(--soft); border-color: var(--soft); color: #77
 .correction-row input { flex: 1 1 240px; min-width: 0; border: 1px solid #bbb8cf; border-radius: 10px; padding: 12px; font: inherit; }
 .correction-row input:focus { outline: 2px solid #665bdd; outline-offset: 2px; }
 #correction-status { font-size: 13px; }
-.live-preview { margin: 12px 24px 0; padding: 16px; border: 1px solid #d9d5ef; border-radius: 12px; background: #f7f5ff; }
-.live-preview p { margin: 8px 0; min-height: 1.5em; font-size: 18px; line-height: 1.5; }
-.live-preview small { color: #59566e; }

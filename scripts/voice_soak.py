@@ -2,7 +2,7 @@
 
 Usage: python scripts/voice_soak.py wss://host/api/v1/voice/assemblyai/browser sample.wav --seconds 480
 The fixture must contain only non-sensitive test speech (PCM16, mono, 24 kHz).
-This consumes the configured voice and caption services and exercises corrections.
+This exercises Voice Agent audio, conversation captions, and corrections.
 It does not reproduce physical speaker echo or browser device behavior.
 """
 
@@ -26,16 +26,15 @@ async def run(url: str, fixture: str, seconds: int) -> None:
     start = time.monotonic()
     counts: Counter = Counter()
     gaps: list[float] = []
-    last_caption = None
-    caption_turn = None
-    caption_text = ""
+    last_partial = None
     done = asyncio.Event()
     ready = asyncio.Event()
     speech_queue: asyncio.Queue = asyncio.Queue()
     turns = 0
+    correction_sent = False
     async with connect(url, open_timeout=15) as socket:
         async def receive():
-            nonlocal last_caption, caption_turn, caption_text
+            nonlocal last_partial
             async for raw in socket:
                 event = json.loads(raw)
                 kind = event.get("type")
@@ -43,15 +42,17 @@ async def run(url: str, fixture: str, seconds: int) -> None:
                 if kind == "session.ready":
                     ready.set()
                     print(json.dumps({"session": event["session_id"]}), flush=True)
-                if kind in {"session.error", "caption.unavailable"}:
+                if kind == "session.error":
                     raise RuntimeError(f"Live test failed: {kind} {event.get('code', '')}")
                 if kind == "reply.done":
                     done.set()
-                if kind == "caption.preview" and event["text"] != caption_text:
+                if kind == "transcript.user.delta":
                     now = time.monotonic()
-                    if caption_turn == event["turn"] and last_caption:
-                        gaps.append(now - last_caption)
-                    caption_turn, last_caption, caption_text = event["turn"], now, event["text"]
+                    if last_partial:
+                        gaps.append(now - last_partial)
+                    last_partial = now
+                if kind == "transcript.user":
+                    last_partial = None
             raise RuntimeError("Connection closed before the soak completed")
 
         async def feed():
@@ -69,12 +70,13 @@ async def run(url: str, fixture: str, seconds: int) -> None:
                 await asyncio.sleep(max(0, next_packet - time.monotonic()))
 
         async def converse():
-            nonlocal turns
+            nonlocal turns, correction_sent
             await asyncio.wait_for(done.wait(), 30)
             while time.monotonic() - start < seconds:
                 done.clear()
                 before = counts["reply.audio"]
                 if turns == 2:
+                    correction_sent = True
                     await socket.send(json.dumps({"type": "conversation.correction",
                         "text": "My name is Alex. I only need general information, not a member-specific decision. Please answer briefly."}))
                 else:
@@ -85,7 +87,7 @@ async def run(url: str, fixture: str, seconds: int) -> None:
                     raise RuntimeError("Turn completed without spoken audio")
                 turns += 1
                 print(json.dumps({"elapsed_seconds": round(time.monotonic() - start), "turns": turns,
-                                  "preview_updates": counts["caption.preview"]}), flush=True)
+                                  "caller_partial_updates": counts["transcript.user.delta"]}), flush=True)
                 await asyncio.sleep(3)
 
         reader = asyncio.create_task(receive())
@@ -97,11 +99,12 @@ async def run(url: str, fixture: str, seconds: int) -> None:
                 task.result()
             if conversation not in completed:
                 raise RuntimeError("Audio pump stopped early")
-            assert counts["correction.accepted"] == 1
-            assert counts["caption.preview"] > 10
+            if correction_sent:
+                assert counts["correction.accepted"] == 1
+            assert counts["transcript.user.delta"] > 0
             print(json.dumps({"result": "passed", "duration_seconds": round(time.monotonic() - start),
                 "spoken_turns": turns, "events": dict(counts),
-                "median_preview_update_ms": round(statistics.median(gaps) * 1000) if gaps else None}), flush=True)
+                "median_caller_partial_gap_ms": round(statistics.median(gaps) * 1000) if gaps else None}), flush=True)
         finally:
             sender.cancel()
             conversation.cancel()

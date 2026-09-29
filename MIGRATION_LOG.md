@@ -1024,3 +1024,19 @@ measurements remain pending. No ElevenLabs code path will be used if AssemblyAI 
   interval within a recognition turn was 276 ms; this is update cadence, not end-to-end recognition latency.
   Provider session: `sess_12b21cde3b8b4e9cb91f81274bb0369e`. This transport test does not establish acoustic
   accuracy, typed-correction comprehension, or immunity to longer-running provider/network failures.
+
+## 2026-09-30 — Single conversation transcript
+
+- Removed the separate live word preview and its additional Streaming STT connection. The browser now displays
+  only the Voice Agent's own caller partials in the original conversation area; these are the words the agent
+  is processing. The agent's final transcript updates the same row, including when partials lack an item ID.
+- Kept the Voice Agent's balanced transcription mode, continuous partials, microphone and playback settings,
+  tools, and Twilio path. The provider controls the arrival time and grouping of partial words; the UI adds
+  no typing animation or delay. The provider may deliver several words in one update.
+- Validation: 387 Python tests and 43 JavaScript browser/audio tests passed. The hosted service was restarted
+  and the public page returned HTTP 200 with the single conversation area and new assets.
+- A live synthetic call on the updated public service passed for 54 seconds with one spoken caller turn,
+  11 native caller partial updates, spoken agent output, and no separate caption stream. The median gap
+  between native caller partials was 1,202 ms. This is the provider's update cadence on one fixture, not
+  an end-to-end word latency or a guarantee for Brave microphone input. A comparison with `min_latency`
+  was not completed because the network test was blocked by the account's automatic approval usage limit.
