@@ -1,7 +1,7 @@
 """Short-lived authentication tokens for Twilio's AssemblyAI media WebSocket.
 
 Twilio cannot add an Authorization header to ``<Stream>`` connections, so the signed token travels in the
-query string. It contains only Twilio's opaque CallSid and an expiry; no provider or application secret is
+start message's custom parameters. It contains Twilio's opaque CallSid, an expiry and a nonce; no secret is
 exposed to the caller.
 """
 
@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import time
+import secrets
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,7 +38,7 @@ def issue(call_sid: str, secret: str, *, now: int | None = None, ttl_seconds: in
         raise ValueError("call_sid, secret, and a positive ttl_seconds are required")
     issued_at = int(time.time() if now is None else now)
     payload = _b64encode(
-        json.dumps({"call_sid": call_sid, "exp": issued_at + ttl_seconds}, separators=(",", ":")).encode()
+        json.dumps({"call_sid": call_sid, "exp": issued_at + ttl_seconds, "nonce": secrets.token_hex(16)}, separators=(",", ":")).encode()
     )
     signature = _b64encode(hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{signature}"

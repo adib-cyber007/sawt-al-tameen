@@ -2034,6 +2034,17 @@
             "title": "Ok",
             "type": "boolean"
           },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
           "result": {
             "anyOf": [
               {

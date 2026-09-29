@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -18,12 +19,14 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from preauth.agent_tools.assemblyai import all_function_tool_configs
 from preauth.agent_tools.voice_gateway import VoiceToolGateway
-from preauth.infrastructure import assemblyai_media_token
 from preauth.infrastructure.settings import Settings
 
 logger = logging.getLogger("preauth.voice.assemblyai.bridge")
 RESUME_WINDOW_SECONDS = 30
 MAX_RESUME_ATTEMPTS = 3
+TOOL_TIMEOUT_SECONDS = 15
+MAX_PENDING_TOOLS = 32
+_BACKGROUND_TOOLS: set[asyncio.Task] = set()
 
 
 class AssemblyAIResumeError(RuntimeError):
@@ -55,34 +58,54 @@ _TRANSIENT_SESSION_ERRORS = {"server_error", "agent_init_failed", "agent_timeout
 _CONFIGURATION_SESSION_ERRORS = {"invalid_format", "invalid_value", "immutable_field", "invalid_configuration"}
 
 
+@dataclass
+class PendingTool:
+    call_id: str
+    generation: int
+    result: dict[str, Any] | None = None
+    started: bool = False
+    expired: bool = False
+
+
 class AssemblyAIToolCoordinator:
-    """Executes function tools and releases results only at AssemblyAI's safe reply boundary."""
+    """Serial business execution, independent reception, generation-bound result dispatch."""
 
     def __init__(self, gateway: VoiceToolGateway):
         self._gateway = gateway
         self.session_id: str | None = None
         self.ready_count = 0
-        self._pending: list[asyncio.Task[dict[str, Any]]] = []
+        self._pending: list[PendingTool] = []
         self._last_tool_task: asyncio.Task[dict[str, Any]] | None = None
+        self._generation = 0
+        self._safe = False
+        self._turn_finished = False
+        self._boundary_reply_id: str | None = None
+        self._changed = asyncio.Event()
+        self._monitors: set[asyncio.Task] = set()
+        self._executions: set[asyncio.Task] = set()
+        self._closed = False
 
     async def _execute_tool(
         self, call_id: str, name: str, arguments: dict[str, Any],
-        previous: asyncio.Task[dict[str, Any]] | None,
+        previous: asyncio.Task[dict[str, Any]] | None, session_id: str, pending: PendingTool,
     ) -> dict[str, Any]:
         # Business tools retain their original call order, but a slow tool must not stall
         # the provider receive pump and interrupt an in-progress spoken reply.
         if previous is not None:
-            await previous
+            await asyncio.shield(previous)
+        if self._closed or pending.expired or pending.generation != self._generation:
+            return {}  # Queued work that never started has no side effects to preserve.
         try:
-            response = await asyncio.to_thread(self._gateway.call, name, arguments, self.session_id)
+            pending.started = True
+            response = await asyncio.to_thread(self._gateway.call, name, arguments, session_id, provider_call_id=call_id)
             value = response.model_dump(mode="json")
             is_error = not response.ok
         except Exception:
             logger.exception("assemblyai_tool_call_unexpected_failure", extra={"tool": name})
             value = {
                 "ok": False,
-                "error": {"code": "TOOL_EXECUTION_FAILED", "message": "The tool could not be completed."},
-                "guidance": "Apologise briefly and offer a human callback.",
+                "error": {"code": "TOOL_EXECUTION_FAILED", "message": "The operation's outcome could not be confirmed."},
+                "guidance": "Retry the same arguments and request identity. Do not assume cancellation or open a separate request.",
             }
             is_error = True
         return {
@@ -92,41 +115,105 @@ class AssemblyAIToolCoordinator:
             "is_error": is_error,
         }
 
-    async def handle(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _collect(self, pending: PendingTool, task: asyncio.Task) -> None:
+        try:
+            pending.result = await asyncio.wait_for(asyncio.shield(task), TOOL_TIMEOUT_SECONDS)
+        except TimeoutError:
+            # A timeout is not transaction cancellation. Keep the execution task alive and
+            # chained ahead of later operations; its eventual response is durable.
+            pending.expired = True
+            pending.result = {
+                "type": "tool.result", "call_id": pending.call_id, "is_error": True,
+                "result": json.dumps({"ok": False, "error": {"code": "TOOL_TIMEOUT",
+                    "message": ("The operation is still pending; its outcome is not yet known." if pending.started
+                                else "The queued operation exceeded its deadline and did not start.")},
+                    "guidance": "Do not claim failure or start a new request. Retry the same arguments and request key."}),
+            }
+        self._changed.set()
+
+    def disconnected(self) -> None:
+        self._safe = False
+        self._changed.set()
+
+    async def close(self) -> None:
+        self._closed = True
+        self._safe = False
+        self._generation += 1
+        self._pending.clear()
+        for task in self._monitors:
+            task.cancel()
+        await asyncio.gather(*self._monitors, return_exceptions=True)
+
+    async def dispatch(self, provider: Any) -> None:
+        while True:
+            await self._changed.wait()
+            self._changed.clear()
+            for pending in list(self._pending):
+                if not self._safe:
+                    break
+                if pending.generation != self._generation or pending.result is None:
+                    continue
+                if self._boundary_reply_id and self._boundary_reply_id != f"fc-{pending.call_id}":
+                    continue
+                # Recheck after every send; the receiver can invalidate the generation
+                # while a prior send is suspended on network backpressure.
+                await _send_provider(provider, pending.result)
+                if pending in self._pending:
+                    self._pending.remove(pending)
+
+    async def handle(self, event: dict[str, Any]) -> None:
         event_type = event.get("type")
         if event_type == "session.ready":
+            self._safe = False
             session_id = event.get("session_id")
             if isinstance(session_id, str) and session_id:
+                if self.session_id and self.session_id != session_id:
+                    raise AssemblyAIResumeError("Provider changed session identity during resume")
                 self.session_id = session_id
                 self.ready_count += 1
-            return []
+            return
+
+        if event_type == "input.speech.started" or (event_type == "reply.done" and event.get("status") == "interrupted"):
+            self._generation += 1
+            self._pending.clear()
+            self._safe = False
+            self._turn_finished = False
+            return
+
+        if event_type in {"reply.started", "tool.call"} and self._turn_finished:
+            self._generation += 1
+            self._pending.clear()
+            self._turn_finished = False
+        self._safe = False
 
         if event_type == "tool.call":
             call_id, name, arguments = event.get("call_id"), event.get("name"), event.get("arguments")
-            if not isinstance(call_id, str) or not isinstance(name, str) or not isinstance(arguments, dict):
+            if not self.session_id or not isinstance(call_id, str) or not call_id or not isinstance(name, str) or not isinstance(arguments, dict):
                 logger.warning("assemblyai_tool_call_malformed")
-                return []
-            task = asyncio.create_task(self._execute_tool(call_id, name, arguments, self._last_tool_task))
+                return
+            if any(p.call_id == call_id for p in self._pending):
+                return
+            if len(self._pending) >= MAX_PENDING_TOOLS or len(self._executions) >= MAX_PENDING_TOOLS:
+                raise AssemblyAISessionError("Too many pending tool calls")
+            pending = PendingTool(call_id, self._generation)
+            task = asyncio.create_task(self._execute_tool(call_id, name, arguments, self._last_tool_task, self.session_id, pending))
+            self._executions.add(task)
+            task.add_done_callback(self._executions.discard)
+            _BACKGROUND_TOOLS.add(task)
+            task.add_done_callback(_BACKGROUND_TOOLS.discard)
+            task.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
             self._last_tool_task = task
-            self._pending.append(task)
-            return []
+            self._pending.append(pending)
+            monitor = asyncio.create_task(self._collect(pending, task))
+            self._monitors.add(monitor)
+            monitor.add_done_callback(self._monitors.discard)
+            return
 
         if event_type == "reply.done":
-            if event.get("status") == "interrupted":
-                self._pending.clear()
-                return []
-            ready, self._pending = self._pending, []
-            return await asyncio.gather(*ready) if ready else []
-        return []
-
-
-def twilio_call_sid(settings: Settings, token: str) -> str | None:
-    if not settings.assemblyai_media_secret:
-        return None
-    try:
-        return assemblyai_media_token.verify(token, settings.assemblyai_media_secret).call_sid
-    except assemblyai_media_token.MediaTokenInvalidError:
-        return None
+            self._boundary_reply_id = event.get("reply_id")
+            self._safe = event.get("status") == "completed" and isinstance(self._boundary_reply_id, str)
+            self._turn_finished = self._safe
+            self._changed.set()
 
 
 async def _send_provider(provider: Any, payload: dict[str, Any]) -> None:
@@ -143,8 +230,8 @@ def _safe_browser_event(event: dict[str, Any]) -> dict[str, Any] | None:
     return event
 
 
-async def _run_pair(left: Callable[[], Awaitable[None]], right: Callable[[], Awaitable[None]]) -> None:
-    tasks = {asyncio.create_task(left()), asyncio.create_task(right())}
+async def _run_pair(*pumps: Callable[[], Awaitable[None]]) -> None:
+    tasks = {asyncio.create_task(pump()) for pump in pumps}
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
@@ -272,31 +359,33 @@ async def bridge_browser(websocket: WebSocket, settings: Settings, gateway: Voic
                         if not ready.is_set() or code in _CONFIGURATION_SESSION_ERRORS:
                             raise AssemblyAIConfigurationError("AssemblyAI rejected the session tool configuration")
                         raise AssemblyAISessionError("AssemblyAI reported a terminal session failure")
-                    for result in await coordinator.handle(event):
-                        await _send_provider(provider, result)
+                    await coordinator.handle(event)
                     safe = _safe_browser_event(event)
                     if safe is not None:
                         await websocket.send_json(safe)
 
-            await _run_pair(from_browser, from_provider)
+            try:
+                await _run_pair(from_browser, from_provider, lambda: coordinator.dispatch(provider))
+            finally:
+                coordinator.disconnected()
 
-    await _run_resumable(coordinator, connect_once)
+    try:
+        await _run_resumable(coordinator, connect_once)
+    finally:
+        await coordinator.close()
     if not client_active:
         return
 
 
 async def bridge_twilio(
-    websocket: WebSocket, settings: Settings, gateway: VoiceToolGateway, expected_call_sid: str
+    websocket: WebSocket, settings: Settings, gateway: VoiceToolGateway, expected_call_sid: str, stream_sid: str
 ) -> None:
     coordinator = AssemblyAIToolCoordinator(gateway)
-    stream_sid: str | None = None
     client_active = True
 
     async def connect_once(resume_session_id: str | None) -> None:
-        nonlocal stream_sid, client_active
-        provider_ready, twilio_ready = asyncio.Event(), asyncio.Event()
-        if stream_sid:
-            twilio_ready.set()
+        nonlocal client_active
+        provider_ready = asyncio.Event()
         async with connect(
             settings.assemblyai_ws_url,
             additional_headers={"Authorization": f"Bearer {settings.assemblyai_api_key}"},
@@ -315,22 +404,15 @@ async def bridge_twilio(
                 )
 
             async def from_twilio() -> None:
-                nonlocal stream_sid, client_active
+                nonlocal client_active
                 try:
                     while True:
                         event = await websocket.receive_json()
                         event_type = event.get("event") if isinstance(event, dict) else None
-                        if event_type == "start":
-                            start = event.get("start", {})
-                            if start.get("callSid") != expected_call_sid:
-                                client_active = False
-                                logger.warning("assemblyai_twilio_call_sid_mismatch")
-                                await websocket.close(code=1008, reason="Twilio call identity did not match")
-                                return
-                            candidate = start.get("streamSid") or event.get("streamSid")
-                            if isinstance(candidate, str) and candidate:
-                                stream_sid = candidate
-                                twilio_ready.set()
+                        if event_type == "start" or event.get("streamSid", stream_sid) != stream_sid:
+                            client_active = False
+                            await websocket.close(code=1008, reason="Twilio stream identity did not match")
+                            return
                         elif event_type == "media" and event.get("media", {}).get("track", "inbound") == "inbound":
                             payload = event.get("media", {}).get("payload")
                             if isinstance(payload, str):
@@ -382,19 +464,25 @@ async def bridge_twilio(
                         if not provider_ready.is_set() or code in _CONFIGURATION_SESSION_ERRORS:
                             raise AssemblyAIConfigurationError("AssemblyAI rejected the session tool configuration")
                         raise AssemblyAISessionError("AssemblyAI reported a terminal session failure")
-                    for result in await coordinator.handle(event):
-                        await _send_provider(provider, result)
+                    await coordinator.handle(event)
                     if event_type == "reply.audio" and isinstance(event.get("data"), str):
-                        await twilio_ready.wait()
                         await websocket.send_json(
                             {"event": "media", "streamSid": stream_sid, "media": {"payload": event["data"]}}
                         )
-                    elif event_type == "input.speech.started" and twilio_ready.is_set():
+                    elif event_type == "input.speech.started" or (
+                        event_type == "reply.done" and event.get("status") == "interrupted"
+                    ):
                         await websocket.send_json({"event": "clear", "streamSid": stream_sid})
 
-            await _run_pair(from_twilio, from_provider)
+            try:
+                await _run_pair(from_twilio, from_provider, lambda: coordinator.dispatch(provider))
+            finally:
+                coordinator.disconnected()
 
-    await _run_resumable(coordinator, connect_once)
+    try:
+        await _run_resumable(coordinator, connect_once)
+    finally:
+        await coordinator.close()
     if not client_active:
         return
 

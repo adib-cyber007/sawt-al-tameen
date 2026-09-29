@@ -1,5 +1,7 @@
 import json
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime
 from enum import Enum
 from typing import Any
@@ -24,6 +26,19 @@ from preauth.infrastructure.db.repositories import (
 from preauth.infrastructure.observability import request_id_var
 
 logger = logging.getLogger("preauth.audit")
+
+# Only explicitly scoped voice operations join a transaction. Ordinary API use cases
+# retain their existing transaction boundaries. Context is local to the executing thread.
+_shared_transaction: ContextVar[tuple[object, Session] | None] = ContextVar("shared_transaction", default=None)
+
+
+@contextmanager
+def shared_transaction(session_factory, session):
+    token = _shared_transaction.set((session_factory, session))
+    try:
+        yield
+    finally:
+        _shared_transaction.reset(token)
 
 
 def _json_default(value: Any) -> Any:
@@ -74,7 +89,9 @@ class UnitOfWork:
         self.clock = clock
 
     def __enter__(self) -> "UnitOfWork":
-        self.session = self._session_factory()
+        shared = _shared_transaction.get()
+        self._joined = shared is not None and shared[0] is self._session_factory
+        self.session = shared[1] if self._joined else self._session_factory()
         self.catalogue = CatalogueRepository(self.session)
         self.cases = CaseRepository(self.session)
         self.evaluations = EvaluationRepository(self.session)
@@ -85,6 +102,8 @@ class UnitOfWork:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        if self._joined:
+            return  # The outer operation owns rollback and closing, including savepoints.
         if exc_type is not None:
             self.session.rollback()
         self.session.close()
@@ -93,12 +112,14 @@ class UnitOfWork:
         try:
             self.session.flush()
         except StaleDataError as e:
-            self.session.rollback()
+            if not self._joined:
+                self.session.rollback()
             raise ConcurrencyConflictError("The case was modified concurrently; reload and retry") from e
 
     def commit(self) -> None:
         self.flush()
-        self.session.commit()
+        if not self._joined:
+            self.session.commit()
 
     def transition(
         self,

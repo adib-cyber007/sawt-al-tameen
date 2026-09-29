@@ -5,17 +5,20 @@ every conversation that touched the case has delivered its transcript (see ``pen
 """
 
 import logging
+import hashlib
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.exc import IntegrityError
 
 from preauth.application.unit_of_work import UnitOfWork
 from preauth.domain.actors import SYSTEM_ACTOR
 from preauth.domain.enums import AuditEventType
 from preauth.domain.errors import NotFoundError
 from preauth.infrastructure.clock import Clock, new_id
-from preauth.infrastructure.db.models import CallRecord, VoiceToolInvocation
+from preauth.infrastructure.db.models import CallRecord, VoiceToolInvocation, TwilioMediaAdmission
+from preauth.infrastructure import assemblyai_media_token
 from preauth.domain.actors import Actor
 from preauth.infrastructure.observability import actor_var, bind_case_id, conversation_id_var, request_id_var
 
@@ -76,6 +79,19 @@ class VoiceChannelService:
                 )
             )
             uow.commit()
+
+    def claim_twilio_stream(self, token: str, secret: str, stream_sid: str) -> bool:
+        verified = assemblyai_media_token.verify(token, secret)
+        try:
+            with self._session_factory.begin() as session:
+                session.add(TwilioMediaAdmission(
+                    token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                    call_sid=verified.call_sid, stream_sid=stream_sid,
+                    expires_at=verified.expires_at, admitted_at=self._clock.now(),
+                ))
+            return True
+        except IntegrityError:
+            return False
 
     @staticmethod
     def _link_cases(uow: UnitOfWork, record: CallRecord) -> list[str]:

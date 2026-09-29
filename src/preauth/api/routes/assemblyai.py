@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query, Request, WebSocket
+from fastapi import APIRouter, Header, Request, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
 from preauth.api.errors import ErrorResponse
@@ -10,8 +10,8 @@ from preauth.api.assemblyai_bridge import (
     bridge_browser,
     bridge_twilio,
     close_after_bridge,
-    twilio_call_sid,
 )
+from preauth.api.twilio_admission import read_start, verify_upgrade
 from preauth.api.routes.cases import _doc
 from preauth.application.assemblyai_post_call import AssemblyAIPostCallService
 from preauth.application.voice_channel_service import PostCallOutcome
@@ -62,19 +62,38 @@ async def assemblyai_browser(websocket: WebSocket) -> None:
 
 
 @router.websocket("/twilio")
-async def assemblyai_twilio(websocket: WebSocket, token: str = Query(default="")) -> None:
+async def assemblyai_twilio(websocket: WebSocket) -> None:
     settings = websocket.app.state.settings
-    call_sid = twilio_call_sid(settings, token)
     if not (
         settings.assemblyai_enabled
         and settings.assemblyai_api_key
         and settings.assemblyai_phone_agent_id
-        and call_sid
+        and settings.twilio_auth_token
+        and settings.public_base_url
+        and settings.assemblyai_media_secret
     ):
         await websocket.close(code=1008, reason="AssemblyAI Twilio channel is not authorised")
         return
+    try:
+        verify_upgrade(websocket, settings)
+    except ValueError:
+        await websocket.close(code=1008, reason="Twilio upgrade is not authorised")
+        return
     await websocket.accept()
+    try:
+        start = await read_start(websocket, settings)
+        claimed = await run_in_threadpool(
+            websocket.app.state.services.voice.claim_twilio_stream,
+            start.token, settings.assemblyai_media_secret, start.stream_sid,
+        )
+        if not claimed:
+            raise ValueError("Stream admission was already used")
+    except (ValueError, TimeoutError):
+        await websocket.close(code=1008, reason="Twilio start is not authorised")
+        return
+    except WebSocketDisconnect:
+        return
     await close_after_bridge(
         websocket,
-        bridge_twilio(websocket, settings, websocket.app.state.assemblyai_voice_gateway, call_sid),
+        bridge_twilio(websocket, settings, websocket.app.state.assemblyai_voice_gateway, start.call_sid, start.stream_sid),
     )

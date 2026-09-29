@@ -44,7 +44,19 @@ class ToolArgumentsInvalidError(DomainError):
 # --------------------------------------------------------------------------- tool inputs
 
 
-class VerifyCallerInput(StrictModel):
+class VoiceRequestInput(StrictModel):
+    request_id: str | None = Field(
+        default=None, description="Application request_id returned by a previous attempt of this exact tool operation. Reuse it on retries."
+    )
+    request_key: str | None = Field(
+        default=None, max_length=100, min_length=1,
+        description="Omit normally: identical arguments in this session reuse the saved result. "
+        "For a deliberately separate request or a fresh re-check after new evidence, choose a new stable key "
+        "only when the caller asks for it. Reuse that same key on every retry; never generate a new key just because a response was interrupted.",
+    )
+
+
+class VerifyCallerInput(VoiceRequestInput):
     """Identify the caller, and the member if the call concerns one."""
 
     caller_role: CallerRole = Field(
@@ -69,7 +81,7 @@ class VerifyCallerInput(StrictModel):
     )
 
 
-class CheckCoverageRuleInput(StrictModel):
+class CheckCoverageRuleInput(VoiceRequestInput):
     """A complete pre-authorisation request. Do not call this with partial details."""
 
     verification_id: str = Field(description=VERIFICATION_DESCRIPTION)
@@ -92,7 +104,7 @@ class CheckCoverageRuleInput(StrictModel):
     )
 
 
-class LogTranscriptInput(StrictModel):
+class LogTranscriptInput(VoiceRequestInput):
     """Record the outcome of the call. Call this before telling the caller what happens next."""
 
     summary: str = Field(description="Two or three sentences: what was requested and what the caller was told.")
@@ -141,17 +153,17 @@ def _convert(build: Callable[[], Any]) -> Any:
 
 
 def _verify_caller(s: ApplicationServices, a: Actor, i: VerifyCallerInput) -> VerificationView:
-    command = _convert(lambda: VerifyCallerCommand(**i.model_dump(exclude_none=True)))
+    command = _convert(lambda: VerifyCallerCommand(**i.model_dump(exclude_none=True, exclude={"request_id", "request_key"})))
     return s.desk.verify_caller(a, command)
 
 
 def _check_coverage_rule(s: ApplicationServices, a: Actor, i: CheckCoverageRuleInput) -> CoverageCheckView:
-    command = _convert(lambda: CoverageCheckCommand(**i.model_dump(exclude_none=True)))
+    command = _convert(lambda: CoverageCheckCommand(**i.model_dump(exclude_none=True, exclude={"request_id", "request_key"})))
     return s.desk.check_coverage_rule(a, command)
 
 
 def _log_transcript(s: ApplicationServices, a: Actor, i: LogTranscriptInput) -> CallLogView:
-    command = _convert(lambda: LogTranscriptCommand(**i.model_dump(exclude_none=True)))
+    command = _convert(lambda: LogTranscriptCommand(**i.model_dump(exclude_none=True, exclude={"request_id", "request_key"})))
     return s.desk.log_transcript(a, command)
 
 

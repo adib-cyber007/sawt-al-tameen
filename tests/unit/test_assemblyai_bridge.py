@@ -15,9 +15,11 @@ class FakeGateway:
     def __init__(self, response: VoiceToolResponse | None = None):
         self.response = response or VoiceToolResponse(ok=True, result={"case_id": "case-1"})
         self.calls = []
+        self.call_ids = []
 
-    def call(self, name, arguments, conversation_id=None):
+    def call(self, name, arguments, conversation_id=None, provider_call_id=None):
         self.calls.append((name, arguments, conversation_id))
+        self.call_ids.append(provider_call_id)
         return self.response
 
 
@@ -71,6 +73,7 @@ class FakeProvider:
         self.events = events
         self.error = error
         self.sent = []
+        self.result_sent = asyncio.Event()
 
     async def __aenter__(self):
         return self
@@ -80,11 +83,15 @@ class FakeProvider:
 
     async def send(self, raw):
         self.sent.append(json.loads(raw))
+        if self.sent[-1]["type"] == "tool.result":
+            self.result_sent.set()
 
     async def __aiter__(self):
         for event in self.events:
             await asyncio.sleep(0)
             yield json.dumps(event)
+        if any(e.get("type") == "tool.call" for e in self.events):
+            await asyncio.wait_for(self.result_sent.wait(), 2)
         if self.error:
             raise self.error
 
@@ -131,86 +138,124 @@ def test_media_token_rejects_tampering_and_the_wrong_secret():
             raise AssertionError("forged media token was accepted")
 
 
-def test_tool_result_waits_for_reply_done_and_uses_the_provider_session_id():
-    gateway = FakeGateway()
+async def wait_until(predicate):
+    async with asyncio.timeout(2):
+        while not predicate():
+            await asyncio.sleep(0.001)
+
+
+async def run_tool_result(response=None):
+    gateway = FakeGateway(response)
     coordinator = AssemblyAIToolCoordinator(gateway)
+    provider = FakeProvider([])
+    dispatch = asyncio.create_task(coordinator.dispatch(provider))
+    try:
+        await coordinator.handle({"type": "session.ready", "session_id": "sess_123"})
+        await coordinator.handle({"type": "tool.call", "call_id": "call_1", "name": "lookup", "arguments": {"x": 1}})
+        await wait_until(lambda: coordinator._pending[0].result is not None)
+        assert provider.sent == []
+        await coordinator.handle({"type": "reply.done", "reply_id": "fc-call_1", "status": "completed"})
+        await wait_until(lambda: provider.sent)
+        return gateway, provider.sent
+    finally:
+        dispatch.cancel()
+        await asyncio.gather(dispatch, return_exceptions=True)
+        await coordinator.close()
 
-    async def scenario():
-        assert await coordinator.handle({"type": "session.ready", "session_id": "sess_123"}) == []
-        assert await coordinator.handle(
-            {"type": "tool.call", "call_id": "call_1", "name": "get_case_status", "arguments": {"x": 1}}
-        ) == []
-        return await coordinator.handle({"type": "reply.done"})
 
-    results = asyncio.run(scenario())
-    assert gateway.calls == [("get_case_status", {"x": 1}, "sess_123")]
-    assert len(results) == 1
+def test_tool_result_waits_for_reply_done_and_uses_provider_session_and_call_ids():
+    gateway, results = asyncio.run(run_tool_result())
+    assert gateway.calls == [("lookup", {"x": 1}, "sess_123")]
+    assert gateway.call_ids == ["call_1"]
     assert results[0]["call_id"] == "call_1"
     assert results[0]["is_error"] is False
-    assert json.loads(results[0]["result"]) == {
-        "ok": True, "result": {"case_id": "case-1"}, "error": None, "guidance": None
-    }
-
-
-def test_interrupted_reply_discards_pending_tool_results():
-    coordinator = AssemblyAIToolCoordinator(FakeGateway())
-
-    async def scenario():
-        await coordinator.handle(
-            {"type": "tool.call", "call_id": "call_1", "name": "get_case_status", "arguments": {}}
-        )
-        assert await coordinator.handle({"type": "reply.done", "status": "interrupted"}) == []
-        return await coordinator.handle({"type": "reply.done"})
-
-    assert asyncio.run(scenario()) == []
 
 
 def test_failed_tool_result_is_marked_as_an_error():
-    gateway = FakeGateway(
-        VoiceToolResponse(ok=False, error={"code": "NOT_FOUND", "message": "Missing", "details": {}})
-    )
-    coordinator = AssemblyAIToolCoordinator(gateway)
-
-    async def scenario():
-        await coordinator.handle({"type": "tool.call", "call_id": "call_1", "name": "lookup", "arguments": {}})
-        return await coordinator.handle({"type": "reply.done"})
-
-    result = asyncio.run(scenario())[0]
-    assert result["is_error"] is True
-    assert json.loads(result["result"])["error"]["code"] == "NOT_FOUND"
+    _, results = asyncio.run(run_tool_result(VoiceToolResponse(ok=False, error={"code": "NOT_FOUND"})))
+    assert results[0]["is_error"] is True
+    assert json.loads(results[0]["result"])["error"]["code"] == "NOT_FOUND"
 
 
-def test_slow_tool_does_not_block_incoming_audio_and_keeps_tool_order():
-    started = threading.Event()
-    release = threading.Event()
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_slow_tool_after_reply_done_does_not_block_events_or_leak_to_a_new_turn(interrupt):
+    started, release = threading.Event(), threading.Event()
 
     class SlowGateway(FakeGateway):
-        def call(self, name, arguments, conversation_id=None):
-            if name == "first":
-                started.set()
-                assert release.wait(timeout=2)
-            return super().call(name, arguments, conversation_id)
+        def call(self, name, arguments, conversation_id=None, provider_call_id=None):
+            started.set()
+            assert release.wait(3)
+            return super().call(name, arguments, conversation_id, provider_call_id)
 
     gateway = SlowGateway()
-    coordinator = AssemblyAIToolCoordinator(gateway)
 
     async def scenario():
-        await coordinator.handle({"type": "session.ready", "session_id": "sess_slow"})
-        await coordinator.handle({"type": "tool.call", "call_id": "1", "name": "first", "arguments": {}})
-        await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=1)
-        await asyncio.wait_for(coordinator.handle({"type": "reply.audio", "data": "pcm"}), timeout=0.1)
-        await coordinator.handle({"type": "tool.call", "call_id": "2", "name": "second", "arguments": {}})
-        assert gateway.calls == []
-        release.set()
-        return await coordinator.handle({"type": "reply.done"})
+        coordinator = AssemblyAIToolCoordinator(gateway)
+        provider = FakeProvider([])
+        dispatcher = asyncio.create_task(coordinator.dispatch(provider))
+        try:
+            await coordinator.handle({"type": "session.ready", "session_id": "sess_slow"})
+            await coordinator.handle({"type": "tool.call", "call_id": "1", "name": "lookup", "arguments": {}})
+            await wait_until(started.is_set)
+            # This is the boundary that previously waited for the thread and blocked barge-in.
+            await asyncio.wait_for(coordinator.handle({"type": "reply.done", "reply_id": "fc-1", "status": "completed"}), .1)
+            if interrupt:
+                await asyncio.wait_for(coordinator.handle({"type": "input.speech.started"}), .1)
+                await coordinator.handle({"type": "reply.done", "reply_id": "fc-1", "status": "interrupted"})
+            release.set()
+            await wait_until(lambda: not coordinator._monitors)
+            if interrupt:
+                await coordinator.handle({"type": "reply.started", "reply_id": "new-turn"})
+                await coordinator.handle({"type": "reply.done", "reply_id": "new-turn", "status": "completed"})
+                await asyncio.sleep(.01)
+                assert provider.sent == []
+            else:
+                await wait_until(lambda: provider.sent)
+                assert provider.sent[0]["call_id"] == "1"
+        finally:
+            release.set()
+            dispatcher.cancel()
+            await asyncio.gather(dispatcher, return_exceptions=True)
+            await coordinator.close()
+    asyncio.run(scenario())
+    assert len(gateway.calls) == 1  # Started work completes even when speech is interrupted.
 
-    try:
-        results = asyncio.run(scenario())
-    finally:
-        release.set()
-    assert [result["call_id"] for result in results] == ["1", "2"]
-    assert [call[0] for call in gateway.calls] == ["first", "second"]
-    assert all(call[2] == "sess_slow" for call in gateway.calls)
+
+def test_timeout_keeps_started_work_in_order_and_reports_unknown_outcome(monkeypatch):
+    monkeypatch.setattr(assemblyai_bridge, "TOOL_TIMEOUT_SECONDS", .03)
+    release, started = threading.Event(), threading.Event()
+
+    class SlowGateway(FakeGateway):
+        def call(self, name, arguments, conversation_id=None, provider_call_id=None):
+            if name == "first":
+                started.set()
+                assert release.wait(3)
+            return super().call(name, arguments, conversation_id, provider_call_id)
+
+    gateway = SlowGateway()
+
+    async def scenario():
+        coordinator = AssemblyAIToolCoordinator(gateway)
+        provider = FakeProvider([])
+        dispatcher = asyncio.create_task(coordinator.dispatch(provider))
+        try:
+            await coordinator.handle({"type": "session.ready", "session_id": "sess_timeout"})
+            await coordinator.handle({"type": "tool.call", "call_id": "1", "name": "first", "arguments": {}})
+            await wait_until(started.is_set)
+            await coordinator.handle({"type": "reply.done", "reply_id": "fc-1", "status": "completed"})
+            await wait_until(lambda: provider.sent)
+            assert json.loads(provider.sent[0]["result"])["error"]["code"] == "TOOL_TIMEOUT"
+            await coordinator.handle({"type": "tool.call", "call_id": "2", "name": "second", "arguments": {}})
+            assert gateway.calls == []
+            release.set()
+            await wait_until(lambda: len(gateway.calls) == 2)
+            assert [c[0] for c in gateway.calls] == ["first", "second"]
+        finally:
+            release.set()
+            dispatcher.cancel()
+            await asyncio.gather(dispatcher, return_exceptions=True)
+            await coordinator.close()
+    asyncio.run(scenario())
 
 
 def test_browser_bridge_maps_pcm_audio_and_sanitises_ready_event(monkeypatch):
@@ -252,6 +297,69 @@ def test_browser_bridge_maps_pcm_audio_and_sanitises_ready_event(monkeypatch):
     ]
 
 
+def test_reconnect_holds_completed_results_until_matching_new_boundary():
+    async def scenario():
+        coordinator = AssemblyAIToolCoordinator(FakeGateway())
+        provider = FakeProvider([])
+        dispatch = asyncio.create_task(coordinator.dispatch(provider))
+        try:
+            await coordinator.handle({"type": "session.ready", "session_id": "sess_resume"})
+            await coordinator.handle({"type": "tool.call", "call_id": "1", "name": "lookup", "arguments": {}})
+            await wait_until(lambda: coordinator._pending[0].result is not None)
+            coordinator.disconnected()
+            await coordinator.handle({"type": "session.ready", "session_id": "sess_resume"})
+            await coordinator.handle({"type": "reply.done", "reply_id": "fc-other", "status": "completed"})
+            await asyncio.sleep(.01)
+            assert provider.sent == []
+            await coordinator.handle({"type": "reply.done", "reply_id": "fc-1", "status": "completed"})
+            await wait_until(lambda: provider.sent)
+            assert provider.sent[0]["call_id"] == "1"
+            with pytest.raises(assemblyai_bridge.AssemblyAIResumeError):
+                await coordinator.handle({"type": "session.ready", "session_id": "different_session"})
+        finally:
+            dispatch.cancel()
+            await asyncio.gather(dispatch, return_exceptions=True)
+            await coordinator.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("finish", ["interrupt", "close", "expire"])
+def test_queued_work_cannot_start_after_interruption_close_or_deadline(monkeypatch, finish):
+    release, started = threading.Event(), threading.Event()
+    if finish == "expire":
+        monkeypatch.setattr(assemblyai_bridge, "TOOL_TIMEOUT_SECONDS", .02)
+
+    class SlowGateway(FakeGateway):
+        def call(self, name, arguments, conversation_id=None, provider_call_id=None):
+            if name == "first":
+                started.set()
+                assert release.wait(3)
+            return super().call(name, arguments, conversation_id, provider_call_id)
+
+    gateway = SlowGateway()
+
+    async def scenario():
+        coordinator = AssemblyAIToolCoordinator(gateway)
+        try:
+            await coordinator.handle({"type": "session.ready", "session_id": "sess_queue"})
+            for call_id, name in [("1", "first"), ("2", "second")]:
+                await coordinator.handle({"type": "tool.call", "call_id": call_id, "name": name, "arguments": {}})
+            await wait_until(started.is_set)
+            if finish == "interrupt":
+                await coordinator.handle({"type": "input.speech.started"})
+            elif finish == "close":
+                await coordinator.close()
+            else:
+                await wait_until(lambda: all(p.expired for p in coordinator._pending))
+            release.set()
+            await wait_until(lambda: not coordinator._executions)
+            assert [c[0] for c in gateway.calls] == ["first"]
+        finally:
+            release.set()
+            await coordinator.close()
+    asyncio.run(scenario())
+
+
 def test_twilio_bridge_maps_pcmu_audio_barge_in_and_tool_results(monkeypatch):
     provider = FakeProvider(
         [
@@ -260,12 +368,11 @@ def test_twilio_bridge_maps_pcmu_audio_barge_in_and_tool_results(monkeypatch):
             {"type": "reply.audio", "data": "outbound-pcmu"},
             {"type": "input.speech.started"},
             {"type": "tool.call", "call_id": "call_1", "name": "lookup", "arguments": {"id": "1"}},
-            {"type": "reply.done"},
+            {"type": "reply.done", "reply_id": "fc-call_1", "status": "completed"},
         ]
     )
     twilio = FakeClientSocket(
         [
-            {"event": "start", "start": {"callSid": "CA123", "streamSid": "MZ123"}},
             {"event": "media", "media": {"track": "inbound", "payload": "inbound-pcmu"}},
         ]
     )
@@ -277,7 +384,7 @@ def test_twilio_bridge_maps_pcmu_audio_barge_in_and_tool_results(monkeypatch):
         assemblyai_phone_agent_id="agent_phone",
     )
 
-    asyncio.run(assemblyai_bridge.bridge_twilio(twilio, settings, gateway, "CA123"))
+    asyncio.run(assemblyai_bridge.bridge_twilio(twilio, settings, gateway, "CA123", "MZ123"))
 
     assert provider.sent[0] == {"type": "session.update", "session": {"agent_id": "agent_phone"}}
     assert provider.sent[1]["type"] == "session.update"
@@ -380,7 +487,7 @@ def test_twilio_bridge_resumes_without_losing_the_stream_identity(monkeypatch):
     )
     providers = iter([first, resumed])
     twilio = FakeClientSocket(
-        [{"event": "start", "start": {"callSid": "CA123", "streamSid": "MZ123"}}]
+        []
     )
     monkeypatch.setattr(assemblyai_bridge, "connect", lambda *args, **kwargs: next(providers))
 
@@ -394,7 +501,7 @@ def test_twilio_bridge_resumes_without_losing_the_stream_identity(monkeypatch):
         assemblyai_phone_agent_id="agent_phone",
     )
 
-    asyncio.run(assemblyai_bridge.bridge_twilio(twilio, settings, FakeGateway(), "CA123"))
+    asyncio.run(assemblyai_bridge.bridge_twilio(twilio, settings, FakeGateway(), "CA123", "MZ123"))
 
     assert resumed.sent[0] == {"type": "session.resume", "session_id": "sess_phone_resume"}
     assert twilio.sent == [

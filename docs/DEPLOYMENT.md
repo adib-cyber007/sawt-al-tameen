@@ -128,8 +128,10 @@ In Twilio Console:
 > `https://<public-base-url>/api/v1/voice/twilio/inbound` → HTTP POST → Save
 
 The backend verifies the Twilio request signature, issues a 90-second token bound to `CallSid`, and returns TwiML
-that opens `/api/v1/voice/assemblyai/twilio`. The media socket verifies the token and Twilio start identity, then
-passes native 8 kHz PCMU to the stored phone agent. No Twilio credentials are sent to AssemblyAI.
+that opens `/api/v1/voice/assemblyai/twilio` with the token in a nested custom parameter. The media socket verifies
+the upgrade signature, bounds the start handshake, and checks the token and Twilio identities. A durable admission
+claim rejects replay before opening the stored phone agent. It then passes native 8 kHz PCMU audio.
+Apply `uv run alembic upgrade head` (migration `0002`) before starting this version.
 
 An unsigned inbound request returns 401 when configuration is complete. A 503 response names missing variables.
 
@@ -170,3 +172,7 @@ The command lists completed sessions and uses the same idempotent artifact-inges
 records are left unchanged; artifacts still being prepared remain pending.
 
 Logs are in `.hosted/backend.log` and `.hosted/tunnel.log`. API health is `/health`; OpenAPI is `/docs`.
+
+
+See [voice reliability](VOICE_RELIABILITY.md) for the Twilio custom-parameter handshake,
+non-blocking tool dispatch, durable retries, and migration `0002` rollout requirements.

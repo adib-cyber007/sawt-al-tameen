@@ -197,3 +197,7 @@ optimistic locking and returned as `CONCURRENT_MODIFICATION`.
     That is contained rather than hidden: it cannot state a fact the tools did not return, a tool budget forces it
     to answer the caller, and a final-decision sentence is stripped before the caller hears it. What it can still
     do is ask a clumsy question or call a tool with a value the caller did not confirm.
+
+
+See [voice reliability](VOICE_RELIABILITY.md) for the Twilio custom-parameter handshake,
+non-blocking tool dispatch, durable retries, and migration `0002` rollout requirements.

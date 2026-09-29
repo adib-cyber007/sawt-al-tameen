@@ -483,6 +483,45 @@ class VoiceToolInvocation(Base):
     invoked_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
+class TwilioMediaAdmission(Base):
+    __tablename__ = "twilio_media_admissions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    call_sid: Mapped[str] = mapped_column(String(100), unique=True)
+    stream_sid: Mapped[str] = mapped_column(String(100), unique=True)
+    expires_at: Mapped[int] = mapped_column(BigInteger)
+    admitted_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class VoiceToolExecution(Base):
+    """An atomic business operation and its replayable response, scoped to an actor/session."""
+
+    __tablename__ = "voice_tool_executions"
+    __table_args__ = (UniqueConstraint("actor_id", "conversation_id", "tool_name", "operation_key"),)
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(100))
+    conversation_id: Mapped[str] = mapped_column(String(100))
+    tool_name: Mapped[str] = mapped_column(String(64))
+    operation_key: Mapped[str] = mapped_column(String(64))
+    arguments_hash: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(20))
+    response: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class VoiceProviderCall(Base):
+    __tablename__ = "voice_provider_calls"
+    __table_args__ = (UniqueConstraint("actor_id", "conversation_id", "provider_call_id"),)
+
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(100))
+    conversation_id: Mapped[str] = mapped_column(String(100))
+    provider_call_id: Mapped[str] = mapped_column(String(100))
+    execution_id: Mapped[str] = mapped_column(ForeignKey("voice_tool_executions.id"))
+    request_hash: Mapped[str] = mapped_column(String(64))
+
+
 class CallRecord(Base):
     """Transcript and analysis delivered by the voice platform's post-call webhook."""
 

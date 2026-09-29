@@ -29,6 +29,21 @@ def test_upgrade_downgrade_upgrade_round_trip(tmp_path):
     command.upgrade(cfg, "head")
 
 
+def test_voice_reliability_upgrade_preserves_existing_cases_and_audit(tmp_path):
+    url = f"sqlite:///{tmp_path / 'upgrade.db'}"
+    cfg = alembic_config(url)
+    command.upgrade(cfg, "0001")
+    eng = build_engine(url)
+    with eng.begin() as conn:
+        _insert_case_and_event(conn)
+    command.upgrade(cfg, "head")
+    with eng.connect() as conn:
+        assert conn.execute(text("SELECT case_reference FROM pre_authorization_cases")).scalar_one() == "PA-TEST0001"
+        assert conn.execute(text("SELECT event_type FROM audit_events")).scalar_one() == "CASE_CREATED"
+        assert conn.execute(text("SELECT count(*) FROM voice_tool_executions")).scalar_one() == 0
+    eng.dispose()
+
+
 def _trigger_names(conn) -> set[str]:
     if conn.dialect.name == "postgresql":
         return set(conn.execute(text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")).scalars())

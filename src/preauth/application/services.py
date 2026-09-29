@@ -9,6 +9,7 @@ from preauth.application.evaluation_service import EvaluationService
 from preauth.application.query_service import CaseQueryService
 from preauth.application.review_service import ReviewService
 from preauth.application.voice_channel_service import VoiceChannelService
+from preauth.application.voice_execution_service import VoiceExecutionService
 from preauth.infrastructure.clock import Clock, SystemClock
 from preauth.recommendation.engine import DeterministicRecommendationEngine, RecommendationEngine
 from preauth.rules.uae_ruleset import build_uae_rules_engine
@@ -24,6 +25,7 @@ class ApplicationServices:
     queries: CaseQueryService
     callbacks: CallbackService
     voice: VoiceChannelService
+    executions: VoiceExecutionService
 
 
 def build_services(
@@ -46,4 +48,5 @@ def build_services(
         queries=CaseQueryService(session_factory, clock, rules_engine),
         callbacks=callbacks,
         voice=VoiceChannelService(session_factory, clock),
+        executions=VoiceExecutionService(session_factory, clock),
     )

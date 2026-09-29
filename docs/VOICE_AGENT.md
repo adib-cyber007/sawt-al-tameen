@@ -117,8 +117,9 @@ POST https://<public-base-url>/api/v1/voice/twilio/inbound
 ```
 
 The endpoint verifies `X-Twilio-Signature` and returns TwiML containing a 90-second media token bound to the
-Twilio `CallSid`. The media WebSocket verifies the token and the `start.callSid` before forwarding audio. PCMU is
-passed through at 8 kHz; on caller interruption the bridge clears Twilio's queued output.
+Twilio `CallSid`, passed as a nested Stream parameter. The media WebSocket verifies the upgrade signature and
+the bounded `start` message, then durably claims the token/CallSid/StreamSid before opening an upstream session.
+PCMU passes through at 8 kHz; on caller interruption the bridge clears Twilio's queued output.
 
 Required phone configuration:
 
@@ -198,3 +199,7 @@ For a repeatable transport/audio smoke test, provide a mono PCM16 24 kHz WAV:
 node scripts/voice_audio_smoke.mjs \
   wss://<public-base-url>/api/v1/voice/assemblyai/browser sample.wav 45000
 ```
+
+
+See [voice reliability](VOICE_RELIABILITY.md) for the Twilio custom-parameter handshake,
+non-blocking tool dispatch, durable retries, and migration `0002` rollout requirements.

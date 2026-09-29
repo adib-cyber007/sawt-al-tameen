@@ -41,6 +41,10 @@ The existing project already implements valuable protections: tools without fina
 
 **Prioritized improvements**
 
+Implementation update: recommendations 1–3 are implemented on `codex/voice-reliability`; see
+[voice reliability](VOICE_RELIABILITY.md) for the changes, automated validation, and remaining live acceptance.
+The findings below describe the original research baseline.
+
 P0 means a correctness or access-control issue to resolve before relying on that capability with external users. P1 means a high-value quality or reliability improvement. P2 means a larger product investment. Effort is relative: small is a contained change, medium spans several components, and large requires integrations or operational work. These are engineering judgments, not delivery estimates.
 
 1. **Correct the Twilio stream authentication transport. P0; small–medium effort.**

@@ -1,7 +1,7 @@
 """Inbound calls on our own Twilio number, bridged to AssemblyAI."""
 
 import logging
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import urlencode, urlsplit
 from xml.etree import ElementTree
 
 import pytest
@@ -130,7 +130,9 @@ def test_assemblyai_call_returns_a_signed_local_media_stream(services):
     assert (parsed.scheme, parsed.netloc, parsed.path) == (
         "wss", "sawt-al-tameen.ngrok-free.app", "/api/v1/voice/assemblyai/twilio"
     )
-    token = parse_qs(parsed.query)["token"][0]
+    assert parsed.query == ""
+    token = stream.find("Parameter").attrib["value"]
+    assert stream.find("Parameter").attrib["name"] == "token"
     assert assemblyai_media_token.verify(token, "media-secret").call_sid == CALL["CallSid"]
 
 
@@ -190,3 +192,100 @@ def test_signing_matches_twilios_official_request_validator():
     }
     url = "https://sawt-al-tameen.ngrok-free.app/api/v1/voice/twilio/inbound"
     assert twilio_signature.sign(url, params.items(), "test-auth-token") == "w4A5Fs7SdJOFsBMQfm5s/Ja/krg="
+
+
+SOCKET_PATH = "/api/v1/voice/assemblyai/twilio"
+SOCKET_URL = PUBLIC.replace("https://", "wss://") + SOCKET_PATH
+
+
+def phone_settings():
+    return Settings(voice_provider=VoiceProvider.ASSEMBLYAI, twilio_auth_token=AUTH_TOKEN,
+                    public_base_url=PUBLIC, assemblyai_api_key="test-key",
+                    assemblyai_phone_agent_id=AGENT, assemblyai_media_secret="media-secret")
+
+
+def start_event(token=None):
+    return {"event": "start", "streamSid": "MZ123", "start": {
+        "callSid": CALL["CallSid"], "streamSid": "MZ123",
+        "customParameters": {"token": token or assemblyai_media_token.issue(CALL["CallSid"], "media-secret")},
+        "mediaFormat": {"encoding": "audio/x-mulaw", "sampleRate": 8000, "channels": 1},
+    }}
+
+
+@pytest.fixture
+def admitted_calls(monkeypatch):
+    from preauth.api.routes import assemblyai
+    calls = []
+
+    async def bridge(socket, settings, gateway, call_sid, stream_sid):
+        calls.append((call_sid, stream_sid))
+        await socket.close(code=1000)
+
+    monkeypatch.setattr(assemblyai, "bridge_twilio", bridge)
+    return calls
+
+
+@pytest.mark.parametrize("signature", [None, "forged", twilio_signature.sign("wss://evil.example" + SOCKET_PATH, (), AUTH_TOKEN)])
+def test_upgrade_rejects_missing_forged_or_wrong_host_signature(services, admitted_calls, signature):
+    headers = {"x-twilio-signature": signature} if signature else {}
+    with TestClient(create_app(services, phone_settings())) as client:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect(SOCKET_PATH, headers=headers):
+                pass
+    assert exc.value.code == 1008 and admitted_calls == []
+
+
+@pytest.mark.parametrize("fault", ["expired", "forged", "call", "stream", "missing", "format", "shape", "oversize", "binary", "media", "flood"])
+def test_start_rejected_before_opening_upstream(services, admitted_calls, fault):
+    event = start_event()
+    if fault == "expired":
+        event = start_event(assemblyai_media_token.issue(CALL["CallSid"], "media-secret", now=1))
+    elif fault == "forged":
+        event = start_event("forged")
+    elif fault == "call":
+        event["start"]["callSid"] = "CAother"
+    elif fault == "stream":
+        event["streamSid"] = "MZother"
+    elif fault == "missing":
+        event["start"]["customParameters"] = {}
+    elif fault == "format":
+        event["start"]["mediaFormat"]["sampleRate"] = 24000
+    elif fault == "shape":
+        event = []
+    elif fault == "media":
+        event = {"event": "media", "media": {"payload": "audio-before-auth"}}
+    elif fault == "flood":
+        event = {"event": "connected", "protocol": "Call", "version": "1.0.0"}
+    with TestClient(create_app(services, phone_settings())) as client:
+        with client.websocket_connect(SOCKET_PATH, headers={"x-twilio-signature": twilio_signature.sign(SOCKET_URL, (), AUTH_TOKEN)}) as socket:
+            if fault == "oversize":
+                socket.send_text("x" * 4097)
+            elif fault == "binary":
+                socket.send_bytes(b"binary")
+            else:
+                socket.send_json(event)
+                if fault == "flood":
+                    socket.send_json(event)
+            assert socket.receive()["code"] == 1008
+    assert admitted_calls == []
+
+
+def test_missing_start_times_out_without_upstream(services, admitted_calls, monkeypatch):
+    from preauth.api import twilio_admission
+    monkeypatch.setattr(twilio_admission, "START_TIMEOUT_SECONDS", .02)
+    with TestClient(create_app(services, phone_settings())) as client:
+        with client.websocket_connect(SOCKET_PATH, headers={"x-twilio-signature": twilio_signature.sign(SOCKET_URL, (), AUTH_TOKEN)}) as socket:
+            assert socket.receive()["code"] == 1008
+    assert admitted_calls == []
+
+
+def test_valid_start_is_admitted_once_even_across_app_instances(services, admitted_calls):
+    event = start_event()
+    headers = {"x-twilio-signature": twilio_signature.sign(SOCKET_URL, (), AUTH_TOKEN)}
+    for expected in (1000, 1008):
+        with TestClient(create_app(services, phone_settings())) as client:
+            with client.websocket_connect(SOCKET_PATH, headers=headers) as socket:
+                socket.send_json({"event": "connected", "protocol": "Call", "version": "1.0.0"})
+                socket.send_json(event)
+                assert socket.receive()["code"] == expected
+    assert admitted_calls == [(CALL["CallSid"], "MZ123")]

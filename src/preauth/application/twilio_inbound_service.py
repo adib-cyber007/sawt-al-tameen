@@ -12,7 +12,7 @@ import logging
 from html import escape
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 from preauth.domain.errors import DomainError
 from preauth.infrastructure import twilio_signature
@@ -23,6 +23,13 @@ logger = logging.getLogger("preauth.voice.twilio")
 
 INBOUND_PATH = "/api/v1/voice/twilio/inbound"
 ASSEMBLYAI_TWILIO_PATH = "/api/v1/voice/assemblyai/twilio"
+
+
+def media_stream_url(public_base_url: str) -> str:
+    public = urlsplit(public_base_url)
+    scheme = "wss" if public.scheme == "https" else "ws"
+    path = f"{public.path.rstrip('/')}{ASSEMBLYAI_TWILIO_PATH}"
+    return urlunsplit((scheme, public.netloc, path, "", ""))
 
 class TwilioChannelNotConfiguredError(DomainError):
     code = "CHANNEL_NOT_CONFIGURED"
@@ -82,13 +89,12 @@ class TwilioInboundService:
 
     def _assemblyai_twiml(self, call_sid: str) -> str:
         token = assemblyai_media_token.issue(call_sid, self._media_secret)
-        public = urlsplit(self._public_base_url)
-        scheme = "wss" if public.scheme == "https" else "ws"
-        path = f"{public.path.rstrip('/')}{ASSEMBLYAI_TWILIO_PATH}"
-        stream_url = urlunsplit((scheme, public.netloc, path, urlencode({"token": token}), ""))
+        stream_url = media_stream_url(self._public_base_url)
         return (
             '<?xml version="1.0" encoding="UTF-8"?><Response><Connect>'
-            f'<Stream url="{escape(stream_url, quote=True)}"/></Connect></Response>'
+            f'<Stream url="{escape(stream_url, quote=True)}">'
+            f'<Parameter name="token" value="{escape(token, quote=True)}"/>'
+            '</Stream></Connect></Response>'
         )
 
     def handle(self, raw_body: bytes, signature: str | None, query_string: str = "") -> InboundCallResult:
