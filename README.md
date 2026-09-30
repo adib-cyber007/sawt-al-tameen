@@ -13,6 +13,16 @@ checks every request against the benefit schedule, and leaves the decision to a 
 
 English only ⋄ AED throughout ⋄ Dubai, Abu Dhabi and Sharjah ⋄ DHA and DOH structure
 
+**AssemblyAI Voice Agent Hackathon, September 2026**
+[Try the live voice agent](https://dividable-fretted-aroma.ngrok-free.dev/voice) ·
+[Judge demo guide](https://dividable-fretted-aroma.ngrok-free.dev/voice/assets/judges.html) ·
+[Submission package](docs/submission/SUBMISSION.md) · [MIT license](LICENSE)
+
+The browser demo needs no login and uses fictional records. Hosting runs on a Windows computer through a static
+ngrok tunnel, so that computer must stay online. Document uploads require an operator key. The Twilio bridge is
+implemented, but a live phone number is not configured. See the [acceptance report](docs/CONVERSATION_ACCEPTANCE.md)
+for measured workflows and remaining conversation limits.
+
 [The rule](#rule) · [How a call flows](#flow) · [Tools](#tools) · [Catalogue](#catalogue) · [Run it](#run) ·
 [Phone calls](#phone) · [Testing](#testing) · [Layout](#layout) · [Docs](#docs)
 
@@ -192,7 +202,7 @@ docker compose up -d --wait                               # PostgreSQL
 PREAUTH_TEST_DATABASE_URL=postgres://preauth:preauth@localhost:55432/preauth uv run pytest
 ```
 
-**380 Python tests** and **36 JavaScript audio tests** pass locally; CI runs the Python suite against SQLite and PostgreSQL. They build the
+**393 Python tests** and **46 JavaScript audio tests** pass locally (30 September 2026); CI runs the Python suite against SQLite and PostgreSQL. They build the
 schema through the real Alembic migration, so the migration itself is tested. Among other things, they pin down that:
 - all three lapsed members are rejected;
 - all eleven ambiguous procedures escalate, citing their own rule;

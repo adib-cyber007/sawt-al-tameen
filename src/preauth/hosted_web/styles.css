@@ -36,8 +36,10 @@ h2 { font: 700 20px/1.25 var(--head); margin: 0; }
 .preparation h2 { font-size: 22px; }
 .preparation p { font-size: 14px; color: var(--muted); margin: 6px 0 0; line-height: 1.5; }
 .preparation-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.preparation-list li { background: var(--surface); border-radius: 16px; padding: 16px; font-size: 14px; font-weight: 600; line-height: 1.35; display: flex; flex-direction: column; justify-content: space-between; gap: 14px; min-height: 104px; }
-.preparation-list li::before { content: ""; width: 20px; height: 20px; flex-shrink: 0; border: 2px solid #8c89b8; border-radius: 6px; }
+.preparation-list li { background: var(--surface); border-radius: 16px; font-size: 14px; font-weight: 600; line-height: 1.35; }
+.preparation-list label { display: flex; flex-direction: column; justify-content: space-between; gap: 14px; min-height: 104px; height: 100%; padding: 16px; border-radius: inherit; cursor: pointer; }
+.preparation-list input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; margin: 0; accent-color: var(--success); cursor: pointer; }
+.preparation-list label:has(input:checked) { background: #e6f4ef; }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; align-items: stretch; }
 .card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 28px; overflow: hidden; }
 .heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 22px 30px 10px; }
@@ -101,7 +103,7 @@ button:disabled { background: var(--soft); border-color: var(--soft); color: #77
   .page-heading { gap: 18px; margin-bottom: 24px; }
   .page-heading p { font-size: 16px; }
   .preparation { padding: 22px 18px; }
-  .preparation-list li { padding: 14px; }
+  .preparation-list label { padding: 14px; }
   .heading { padding: 22px 20px 10px; flex-wrap: wrap; gap: 12px; }
   .transcript { height: 420px; padding: 28px 20px; }
   .voice-symbol { width: 140px; height: 140px; }

@@ -16,3 +16,7 @@ models/
 
 # Private uploaded document content
 data/documents/
+
+# Private submission build files and narration audio
+docs/submission/.build/
+docs/submission/submission-package.zip

@@ -1,7 +1,8 @@
 [project]
 name = "preauth"
 version = "0.1.0"
-description = "Provider pre-authorisation case management and agent infrastructure (phase 1)"
+description = "AssemblyAI voice agent for synthetic insurance pre-authorisation with human review"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141",

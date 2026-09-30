@@ -1,0 +1,60 @@
+{
+  "checked_at_utc": "2026-09-30T10:57:38.702187+00:00",
+  "title_characters": 37,
+  "summary_characters": 224,
+  "description_words": 396,
+  "cover_pixels": [
+    1672,
+    941
+  ],
+  "pdf_slides": 9,
+  "video_seconds": 270.129801,
+  "video_bytes": 4925801,
+  "python_tests": {
+    "passed": 393,
+    "run_date": "2026-09-30"
+  },
+  "javascript_tests": {
+    "passed": 46,
+    "run_date": "2026-09-30"
+  },
+  "backend_workflow_checks": {
+    "passed": 26,
+    "target": "http://127.0.0.1:8000",
+    "run_date": "2026-09-30"
+  },
+  "public_unauthenticated_checks": [
+    {
+      "url": "https://dividable-fretted-aroma.ngrok-free.dev/health",
+      "status": 200
+    },
+    {
+      "url": "https://dividable-fretted-aroma.ngrok-free.dev/voice",
+      "status": 200
+    },
+    {
+      "url": "https://dividable-fretted-aroma.ngrok-free.dev/voice/assets/judges.html",
+      "status": 200
+    },
+    {
+      "url": "https://github.com/adib-cyber007/sawt-al-tameen",
+      "status": 404,
+      "action": "Publish the current repository and verify anonymous access"
+    }
+  ],
+  "local_credential_scan": "passed",
+  "lablab_form_submitted": false,
+  "browser_control": "Brave control unavailable: Windows sandbox helper setup failure",
+  "ready_for_final_submission": false,
+  "remaining_actions": [
+    "Publish updated source in a publicly accessible GitHub repository",
+    "Upload assets and submit the lablab form from the logged-in Brave session"
+  ],
+  "limits": [
+    "Twilio phone number not configured",
+    "Hosting depends on the demo computer staying online",
+    "Procedure readback inconsistent",
+    "Physical echo and varied human accents need evaluation",
+    "MP4 contains synthetic narration and actual application screenshots, not a live call recording"
+  ]
+}
