@@ -11,12 +11,15 @@ $action = New-ScheduledTaskAction -Execute $powerShell `
     -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`"" `
     -WorkingDirectory $projectRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+$recoveryTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(3) `
+    -RepetitionInterval (New-TimeSpan -Minutes 3)
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
     -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 2) `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-    -Principal $principal -Settings $settings -Description 'Start the Sawt al-Tameen backend and ngrok at sign-in' `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($trigger, $recoveryTrigger) `
+    -Principal $principal -Settings $settings -Description 'Restore Sawt al-Tameen at sign-in and check every three minutes' `
     -Force | Out-Null
-Write-Output "Registered $taskName for $user sign-in."
+Write-Output "Registered $taskName for $user sign-in and recovery every three minutes."
 Write-Output 'The task starts the local backend and ngrok only while this computer is signed in and online.'

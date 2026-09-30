@@ -208,3 +208,53 @@ def test_assemblyai_preflight_generates_independent_secrets_and_loads_agent_ids(
         )
     )
     assert len(set(generated.values())) == 4
+
+
+def test_exited_backend_restarts_without_stopping_tunnel(monkeypatch):
+    hosted = _module()
+    calls = []
+
+    class Processes:
+        def exited(self):
+            return "backend"
+
+        def stop(self, name):
+            calls.append(("stop", name))
+
+    monkeypatch.setattr(hosted, "start_backend", lambda config, processes: calls.append(("start", "backend")))
+    assert hosted.recover_exited_process({"_TUNNEL": "ngrok"}, Processes()) is True
+    assert calls == [("stop", "backend"), ("start", "backend")]
+
+
+def test_exited_tunnel_restarts_without_stopping_backend(monkeypatch):
+    hosted = _module()
+    calls = []
+
+    class Processes:
+        def exited(self):
+            return "tunnel"
+
+        def stop(self, name):
+            calls.append(("stop", name))
+
+    monkeypatch.setattr(hosted, "launch_ngrok_tunnel", lambda config, processes: calls.append(("start", "tunnel")))
+    assert hosted.recover_exited_process({"_TUNNEL": "ngrok"}, Processes()) is True
+    assert calls == [("stop", "tunnel"), ("start", "tunnel")]
+
+
+def test_unhealthy_local_backend_recovers_after_three_public_failures(monkeypatch):
+    hosted = _module()
+    calls = []
+
+    class Processes:
+        def stop(self, name):
+            calls.append(("stop", name))
+
+    monkeypatch.setattr(hosted, "http_status", lambda url, timeout: (503, ""))
+    monkeypatch.setattr(hosted, "start_backend", lambda config, processes: calls.append(("start", "backend")))
+    config = {"PREAUTH_PUBLIC_BASE_URL": "https://voice.ngrok-free.dev", "PREAUTH_HOSTED_PORT": "8000"}
+    failures = 0
+    for _ in range(3):
+        failures = hosted.check_ngrok_health(config, Processes(), failures)
+    assert failures == 0
+    assert calls == [("stop", "backend"), ("start", "backend")]

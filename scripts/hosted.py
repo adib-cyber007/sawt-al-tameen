@@ -464,6 +464,22 @@ def launch_ngrok_tunnel(config: dict[str, str], processes: Processes) -> None:
     )
 
 
+def recover_exited_process(config: dict[str, str], processes: Processes) -> bool:
+    """Restart a failed child without taking down the other service."""
+    gone = processes.exited()
+    if not gone:
+        return False
+    warn(f"The {gone} process exited; restarting it")
+    processes.stop(gone)
+    if gone == "backend":
+        start_backend(config, processes)
+    elif config["_TUNNEL"] == "ngrok":
+        launch_ngrok_tunnel(config, processes)
+    else:
+        start_tunnel(config, processes)
+    return True
+
+
 def check_ngrok_health(config: dict[str, str], processes: Processes, failures: int) -> int:
     """Heal a persistent public-route failure without restarting the backend or changing the URL."""
     status, body = http_status(f"{config['PREAUTH_PUBLIC_BASE_URL']}/health", timeout=5)
@@ -474,7 +490,9 @@ def check_ngrok_health(config: dict[str, str], processes: Processes, failures: i
         return failures
     local_status, _ = http_status(f"http://127.0.0.1:{config['PREAUTH_HOSTED_PORT']}/health", timeout=3)
     if local_status != 200:
-        warn("public health failed and the local backend is unhealthy; see .hosted/backend.log")
+        warn("public health failed and the local backend is unhealthy; restarting the backend")
+        processes.stop("backend")
+        start_backend(config, processes)
         return 0
     warn(f"public health failed three times (last HTTP {status}); restarting the ngrok tunnel")
     processes.stop("tunnel")
@@ -694,13 +712,15 @@ def main() -> int:
         tunnel_failures = 0
         power_request_active = maintain_awake_on_ac(power_request_active)
         while True:
-            gone = processes.exited()
-            if gone:
-                raise Stop(f"The {gone} process exited unexpectedly.\n{log_tail(gone)}")
-            if config["_TUNNEL"] == "ngrok" and time.monotonic() >= next_tunnel_probe:
-                tunnel_failures = check_ngrok_health(config, processes, tunnel_failures)
-                power_request_active = maintain_awake_on_ac(power_request_active)
-                next_tunnel_probe = time.monotonic() + 15
+            try:
+                recover_exited_process(config, processes)
+                if config["_TUNNEL"] == "ngrok" and time.monotonic() >= next_tunnel_probe:
+                    tunnel_failures = check_ngrok_health(config, processes, tunnel_failures)
+                    power_request_active = maintain_awake_on_ac(power_request_active)
+                    next_tunnel_probe = time.monotonic() + 15
+            except (Stop, OSError) as exc:
+                warn("Recovery failed; retrying in 15 seconds: " + _redact(str(exc), config))
+                time.sleep(15)
             time.sleep(1)
     except Stop as e:
         banner("STOPPED", "red")

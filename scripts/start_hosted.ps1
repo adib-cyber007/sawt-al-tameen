@@ -39,6 +39,14 @@ if (Test-PublicHealth) {
 $portLine = Get-Content -LiteralPath (Join-Path $projectRoot '.env') |
     Where-Object { $_ -match '^\s*PREAUTH_HOSTED_PORT\s*=' } | Select-Object -First 1
 $port = if ($portLine) { [int](((($portLine -split '=', 2)[1] -split '\s+#', 2)[0]).Trim().Trim('"', "'")) } else { 8000 }
+$existingLauncher = Get-CimInstance Win32_Process | Where-Object {
+    $_.ExecutablePath -eq $python -and $_.CommandLine -match 'scripts[/\\]hosted\.py'
+}
+if ($existingLauncher) {
+    Write-Output 'Hosted launcher is already running and will recover its backend and tunnel.'
+    exit 0
+}
+
 $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
 if ($listener) {
     throw "Port $port is already in use but the public URL is unavailable. Check the existing backend before starting another copy."
