@@ -165,6 +165,40 @@ The most recent system recommendation with its rule results, evidence, rationale
 | 422 | `ErrorResponse` | REQUEST_VALIDATION_FAILED |
 | 500 | `ErrorResponse` | INTERNAL_ERROR / INTEGRITY_VIOLATION |
 
+### `POST /api/v1/cases/{case_id}/documents/upload` — Upload and register a supporting document
+
+Receives up to 10 MB of PDF, PNG or JPEG bytes and registers their hash and metadata in private storage.
+
+**Authorisation:** Actor type `PROVIDER_PORTAL` or `VOICE_AGENT`.
+
+**State transitions:** Editable states → INFORMATION_COLLECTION.
+
+**Parameters:** `case_id` (path), `document_type` (query), `title` (query)
+
+**Request body:** —
+
+| Status | Response | Error codes / meaning |
+|---|---|---|
+| 201 | `DocumentView` | Successful Response |
+| 422 | `HTTPValidationError` | Validation Error |
+
+### `GET /api/v1/cases/{case_id}/documents/{document_id}/content` — Download a registered supporting document
+
+Returns privately stored content attached to this case as a download.
+
+**Authorisation:** Any authenticated actor.
+
+**State transitions:** None.
+
+**Parameters:** `case_id` (path), `document_id` (path)
+
+**Request body:** —
+
+| Status | Response | Error codes / meaning |
+|---|---|---|
+| 200 | — | Successful Response |
+| 422 | `HTTPValidationError` | Validation Error |
+
 ## Audit
 
 ### `GET /api/v1/cases/{case_id}/audit-events` — Retrieve the audit trail

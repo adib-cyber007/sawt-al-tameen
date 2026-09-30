@@ -10,6 +10,7 @@ const correctionSend = document.querySelector("#correction-send");
 const correctionStatus = document.querySelector("#correction-status");
 const interruptButton = document.querySelector("#interrupt");
 const retryButton = document.querySelector("#retry");
+const audioMode = document.querySelector("#audio-mode");
 
 let socket;
 let audioContext;
@@ -29,6 +30,7 @@ let starting = false;
 const transcriptItems = new Map();
 let currentReplyId;
 let mutedReplyId;
+let locallyInterrupted = false;
 let healthTimer;
 let lastPong = 0;
 let lastCapture = 0;
@@ -64,8 +66,8 @@ function updateAudioStatus() {
   } else if (ready) {
     setStatus(playbackState === "buffering" ? "Preparing the reply — you can interrupt."
       : playbackState === "speaking"
-      ? "Assistant speaking — speak to interrupt."
-      : "Listening — speak naturally in English.");
+      ? (audioMode.value === "headphones" ? "Assistant speaking — speak to interrupt." : "Assistant speaking — tap Interrupt & speak to take your turn.")
+      : captureBlocked ? "Letting speaker echo clear — speak in a moment." : "Listening — speak naturally in English.");
   }
 }
 
@@ -155,9 +157,10 @@ function appendAgentDelta(event) {
 
 function interruptPlayback() {
   mutedReplyId = currentReplyId;
+  locallyInterrupted = true;
   clearPlayback();
   playbackState = "idle";
-  setStatus("Listening — say your correction now, or type it below.");
+  setStatus(audioMode.value === "headphones" ? "Listening — say your correction now, or type it below." : "Reply stopped — let speaker echo clear briefly, then speak.");
 }
 
 function retryReply() {
@@ -224,6 +227,7 @@ async function startCall() {
   if (starting || audioContext) return;
   starting = true;
   const generation = ++callGeneration;
+  audioMode.disabled = true;
   startButton.disabled = true;
   endButton.disabled = false;
   terminalError = false;
@@ -266,9 +270,9 @@ async function startCall() {
     microphone.onmute = microphone.onunmute = () => {
       if (generation === callGeneration) updateAudioStatus();
     };
-    await context.audioWorklet.addModule("/voice/assets/pcm-capture.js?v=20260930-1");
+    await context.audioWorklet.addModule("/voice/assets/pcm-capture.js?v=20260930-3");
     if (generation !== callGeneration) return;
-    await context.audioWorklet.addModule("/voice/assets/pcm-playback.js?v=20260930-1");
+    await context.audioWorklet.addModule("/voice/assets/pcm-playback.js?v=20260930-3");
     if (generation !== callGeneration) return;
     playbackNode = new AudioWorkletNode(audioContext, "pcm-playback", {
       numberOfInputs: 0,
@@ -289,7 +293,8 @@ async function startCall() {
       channelCountMode: "explicit",
       // Include the device output latency as well as room reverberation.
       processorOptions: { inputSampleRate: audioContext.sampleRate, targetSampleRate: 24000,
-        allowBargeIn: true },
+        allowBargeIn: audioMode.value === "headphones",
+        echoTailSeconds: 0.35 + (context.baseLatency || 0) + (context.outputLatency || 0) },
     });
     playbackNode.connect(captureNode, 1, 1);
     captureNode.onprocessorerror = playbackNode.onprocessorerror = () => {
@@ -355,12 +360,14 @@ async function startCall() {
         waitingSince = Date.now();
       } else if (event.type === "reply.started") {
         currentReplyId = event.reply_id;
+        if (!mutedReplyId || currentReplyId !== mutedReplyId) locallyInterrupted = false;
         waitingSince = lastReplyProgress = Date.now();
       } else if (event.type === "reply.audio" && event.data) {
+        if (event.reply_id && (event.reply_id === mutedReplyId || (currentReplyId && event.reply_id !== currentReplyId))) return;
         lastReplyProgress = Date.now();
         recoveryRequested = false;
         retryButton.hidden = true;
-        if (!mutedReplyId || currentReplyId !== mutedReplyId) playPcm(event.data);
+        if (!locallyInterrupted && (!mutedReplyId || currentReplyId !== mutedReplyId)) playPcm(event.data);
       } else if (event.type === "reply.done") {
         if (event.reply_id && currentReplyId && event.reply_id !== currentReplyId) return;
         waitingSince = event.status === "interrupted" ? Date.now() : 0;
@@ -443,6 +450,8 @@ async function stopCall(sendEnd = true, preserveStatus = false) {
   correctionInput.disabled = correctionSend.disabled = interruptButton.disabled = true;
   retryButton.hidden = true;
   captureBlocked = false;
+  locallyInterrupted = false;
+  audioMode.disabled = false;
   playbackState = "idle";
   if (playbackNode) playbackNode.port.onmessage = null;
   if (captureNode) captureNode.port.onmessage = null;

@@ -123,3 +123,13 @@ button:disabled { background: var(--soft); border-color: var(--soft); color: #77
 .correction-row input { flex: 1 1 240px; min-width: 0; border: 1px solid #bbb8cf; border-radius: 10px; padding: 12px; font: inherit; }
 .correction-row input:focus { outline: 2px solid #665bdd; outline-offset: 2px; }
 #correction-status { font-size: 13px; }
+
+select { font: inherit; color: var(--ink); padding: .65rem; border: 1px solid var(--line); border-radius: 8px; background: white; max-width: 100%; }
+.call-controls > select { display: block; margin: .3rem 0 1rem; }
+.document-desk { max-width: 880px; padding: 28px; margin-bottom: 30px; }
+.document-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 18px 0; }
+.document-fields label { display: grid; gap: 8px; }
+.document-fields input, .document-fields select { width: 100%; min-width: 0; padding: .65rem; border: 1px solid var(--line); border-radius: 8px; }
+.document-desk li { margin-bottom: 10px; }
+.document-desk .heading { margin-top: 32px; }
+@media (max-width: 600px) { .document-fields { grid-template-columns: 1fr; } .document-desk { padding: 18px; } }

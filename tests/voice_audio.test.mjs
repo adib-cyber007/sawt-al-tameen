@@ -336,21 +336,21 @@ test('browser keeps the microphone live during replies and clears interrupted sp
   assert.equal(player.options.numberOfOutputs, 2);
   assert.equal(capture.options.numberOfInputs, 2);
   assert.deepEqual(player.connections[1], [capture, 1, 1]);
-  assert.equal(capture.options.processorOptions.allowBargeIn, true);
+  assert.equal(capture.options.processorOptions.allowBargeIn, false);
   context.liveSocket.onmessage({ data: JSON.stringify({ type: 'session.ready' }) });
   player.port.onmessage({ data: { type: 'playback.state', state: 'buffering' } });
   assert.match(elements.get('#status').textContent, /Preparing the reply/);
   capture.port.onmessage({ data: { type: 'capture.state', blocked: true } });
   assert.match(elements.get('#status').textContent, /Preparing the reply/);
   player.port.onmessage({ data: { type: 'playback.state', state: 'speaking' } });
-  assert.match(elements.get('#status').textContent, /speak to interrupt/);
+  assert.match(elements.get('#status').textContent, /Interrupt & speak|speak to interrupt/);
   context.liveSocket.onmessage({ data: JSON.stringify({ type: 'input.speech.started' }) });
   assert.equal(player.messages.length, 0, 'false VAD event must not cut off the assistant');
   context.liveSocket.onmessage({ data: JSON.stringify({ type: 'reply.done' }) });
   assert.equal(player.messages[0].type, 'flush');
   context.liveSocket.onmessage({ data: JSON.stringify({ type: 'reply.done', status: 'interrupted' }) });
   assert.equal(player.messages[1].type, 'clear');
-  assert.match(elements.get('#status').textContent, /speak to interrupt/);
+  assert.match(elements.get('#status').textContent, /Interrupt & speak|speak to interrupt/);
   capture.port.onmessage({ data: { type: 'capture.state', blocked: false } });
   player.port.onmessage({ data: { type: 'playback.state', state: 'idle' } });
   assert.match(elements.get('#status').textContent, /Listening/);
@@ -651,4 +651,45 @@ test('connection heartbeat loss ends visibly and releases microphone', async () 
   vm.runInContext('checkCallHealth()', context);
   assert.match(elements.get('#status').textContent, /connection stopped responding/);
   assert.equal(track.readyState, 'ended');
+});
+
+
+test('headphone mode enables interruption while retaining browser echo cancellation', async () => {
+  const { context, elements, nodes, constraints } = liveBrowser();
+  elements.get('#audio-mode').value = 'headphones';
+  await vm.runInContext('startCall()', context);
+  assert.equal(nodes[1].options.processorOptions.allowBargeIn, true);
+  assert.equal(constraints().audio.echoCancellation, true);
+  assert.ok(Math.abs(nodes[1].options.processorOptions.echoTailSeconds - 0.4) < 1e-9);
+});
+
+test('manual interruption drops late packets including replies with no id', async () => {
+  const { context, nodes } = liveBrowser();
+  await vm.runInContext('startCall()', context);
+  context.atob = value => Buffer.from(value, 'base64').toString('binary');
+  const send = event => context.liveSocket.onmessage({ data: JSON.stringify(event) });
+  send({ type: 'session.ready' });
+  send({ type: 'reply.started' });
+  vm.runInContext('interruptPlayback()', context);
+  send({ type: 'reply.audio', data: 'AAA=' });
+  assert.deepEqual(nodes[0].messages.map(m => m.type), ['clear']);
+  send({ type: 'reply.started', reply_id: 'new-reply' });
+  send({ type: 'reply.audio', data: 'AAA=' });
+  assert.deepEqual(nodes[0].messages.map(m => m.type), ['clear', 'audio']);
+});
+
+
+test('late audio from an interrupted keyed reply cannot play inside a new reply', async () => {
+  const { context, nodes } = liveBrowser();
+  context.atob = value => Buffer.from(value, 'base64').toString('binary');
+  await vm.runInContext('startCall()', context);
+  const send = event => context.liveSocket.onmessage({data:JSON.stringify(event)});
+  send({type:'reply.started',reply_id:'old'});
+  vm.runInContext('interruptPlayback()',context);
+  send({type:'reply.started',reply_id:'old'});
+  send({type:'reply.audio',reply_id:'old',data:'AAA='});
+  send({type:'reply.started',reply_id:'new'});
+  send({type:'reply.audio',reply_id:'old',data:'AAA='});
+  send({type:'reply.audio',reply_id:'new',data:'AAA='});
+  assert.deepEqual(nodes[0].messages.map(m=>m.type),['clear','audio']);
 });

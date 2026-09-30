@@ -33,6 +33,7 @@ def _optional(name: str) -> str | None:
 class Settings:
     database_url: str = "sqlite:///./preauth.db"
     log_level: str = "INFO"
+    document_store_dir: str = "./data/documents"
     # When set, every /api/v1 route except the voice channel requires header X-Gateway-Secret with this value.
     # Stands in for the authenticating gateway when the service is exposed on a public URL.
     gateway_secret: str | None = None
@@ -71,6 +72,7 @@ class Settings:
         return cls(
             database_url=normalise_database_url(os.environ.get("PREAUTH_DATABASE_URL", cls.database_url)),
             log_level=os.environ.get("PREAUTH_LOG_LEVEL", cls.log_level),
+            document_store_dir=os.environ.get("PREAUTH_DOCUMENT_STORE_DIR", cls.document_store_dir),
             gateway_secret=_optional("PREAUTH_GATEWAY_SECRET"),
             voice_tool_token=_optional("PREAUTH_VOICE_TOOL_TOKEN"),
             voice_provider=_voice_provider(),

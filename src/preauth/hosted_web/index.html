@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1a1848">
   <title>Sawt al-Tameen — pre-authorisation voice assistant</title>
   <link rel="stylesheet" href="/voice/assets/fonts.css?v=20260929-v2">
-<link rel="stylesheet" href="/voice/assets/styles.css?v=20260930-2">
+<link rel="stylesheet" href="/voice/assets/styles.css?v=20260930-4">
 </head>
 <body>
   <a class="skip-link" href="#workspace">Skip to call workspace</a>
@@ -23,7 +23,7 @@
         <div id="transcript" class="transcript" role="log" aria-live="polite" aria-label="What the assistant heard and said" tabindex="0">
           <div class="empty"><span class="voice-symbol" aria-hidden="true"><span class="orb-core"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span></span><h3>Let’s take it one step at a time.</h3><p>Start a call when you’re ready.<br>Your English-language transcript will appear here.</p><span class="empty-note">Speak naturally. The assistant will guide you.</span></div>
         </div>
-        <div class="call-controls"><div class="actions"><button id="start" type="button">Start call</button><button id="end" type="button" class="secondary" disabled>End call</button><button id="interrupt" type="button" class="secondary" disabled>Interrupt &amp; speak</button><button id="resume" type="button" class="secondary" hidden>Resume audio</button><button id="retry" type="button" class="secondary" hidden>Retry reply</button></div><p id="status" role="status">Microphone access is requested only after you start.</p>
+        <div class="call-controls"><label for="audio-mode">Audio setup</label><select id="audio-mode"><option value="speakers">Device speakers — echo protection</option><option value="headphones">Headphones — speak to interrupt</option></select><div class="actions"><button id="start" type="button">Start call</button><button id="end" type="button" class="secondary" disabled>End call</button><button id="interrupt" type="button" class="secondary" disabled>Interrupt &amp; speak</button><button id="resume" type="button" class="secondary" hidden>Resume audio</button><button id="retry" type="button" class="secondary" hidden>Retry reply</button></div><p id="status" role="status">Microphone access is requested only after you start.</p>
           <form id="correction-form" class="correction-form">
             <label for="correction">Did the assistant hear something wrong?</label>
             <div class="correction-row"><input id="correction" type="text" maxlength="1000" placeholder="Type the correct name, number, or detail…" autocomplete="off" disabled><button id="correction-send" type="submit" class="secondary" disabled>Send correction</button></div>
@@ -32,12 +32,12 @@
         </div>
       </section>
       <aside class="guide" aria-label="Call guidance">
-        <section class="guidance"><h2>A little guidance</h2><p>You can speak while the assistant replies. If speaker echo gets in the way, tap “Interrupt &amp; speak” to silence it first.</p><p>Your words appear in the conversation as the assistant recognises them. The text may change until the assistant finishes hearing that turn. To correct a detail, interrupt and say it again; ask the assistant to read it back.</p></section>
-        <section class="review-note"><h2>Prepared by the assistant.<br><span class="decision">Decided by a person.</span></h2><p>The assistant can create and assess a case. Only an authorised human reviewer can approve or deny it.</p></section>
+        <section class="guidance"><h2>A little guidance</h2><p>With device speakers, tap “Interrupt &amp; speak” and then speak once the reply stops. With headphones, select the headphones setting before calling to speak over a reply.</p><p>Your words appear in the conversation as the assistant recognises them. The text may change until the assistant finishes hearing that turn. To correct a detail, interrupt and say it again; ask the assistant to read it back.</p></section>
+        <section class="guidance"><h2>Supporting documents</h2><p>Have your case reference ready. <a href="/documents" target="_blank" rel="noopener">Open the document desk</a> to submit requested documents, then return to this call and ask for a recheck.</p></section><section class="review-note"><h2>Prepared by the assistant.<br><span class="decision">Decided by a person.</span></h2><p>The assistant can create and assess a case. Only an authorised human reviewer can approve or deny it.</p></section>
       </aside>
     </div>
     <footer class="page-footer"><span>Sawt al-Tameen / Sawt Assurance</span><span>Supporting your next step in care.</span></footer>
   </main>
-  <script src="/voice/assets/app.js?v=20260930-2"></script>
+  <script src="/voice/assets/app.js?v=20260930-4"></script>
 </body>
 </html>

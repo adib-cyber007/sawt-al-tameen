@@ -90,11 +90,15 @@ when a shorter reply completes, or after 1.25 seconds with available audio. Afte
 an adaptive 500–1000 ms reserve before continuing, with up to 1.5 seconds of starting reserve on later replies. This cuts added playback latency but a multi-second provider delivery gap can
 still produce an audible pause. The page displays **Preparing the reply** during buffering. Separate reply queues
 preserve reply boundaries, including when a later reply arrives before the previous one finishes playing.
-Browser calls keep the microphone streaming through replies so AssemblyAI's semantic interruption detector can
-hear an actual interruption; interrupted replies clear queued playback. Browser echo cancellation stays enabled,
-while browser noise suppression is disabled to avoid stacking it with AssemblyAI Voice Focus. Headphones are
-recommended where speaker echo causes false interruptions. Browser sessions use far-field Voice Focus for PC speakers and built-in microphones, balanced transcription to preserve identifier accuracy, and continuous partials for
-steadier captions during long caller turns.
+Browser calls offer two audio setups. Device speakers is the default: capture emits timed silence while reply
+playback is queued or active, and through a 350 ms room tail plus the browser-reported device latency. This
+prevents the assistant's speech from becoming caller input even if acoustic echo cancellation fails. Tap
+**Interrupt & speak** to discard the queued reply, then speak when the brief echo tail clears. Late packets for
+the stopped reply are suppressed, including replies without an ID. The next reply plays normally.
+With headphones, choose the headphones setup before calling: capture stays open during replies and the provider's
+semantic detector handles spoken interruptions. Browser acoustic echo cancellation stays enabled in both modes;
+noise suppression remains disabled to avoid stacking it with Voice Focus. The hardware setup is fixed for the
+call, and browser sessions retain far-field Voice Focus, balanced transcription, and continuous partials.
 The browser requests playback-oriented hardware latency to reduce Brave/Chromium audio glitches under load.
 The local recording console pauses assistant playback before recording and prevents playback during recording.
 Microphone permission failures, missing devices and devices in use show actionable errors. Muted or disconnected
@@ -118,8 +122,8 @@ the timing and grouping of partial updates; some updates contain several words.
 browser cannot supply a system role or tool result. Migration `0003` saves submissions in append-only `voice_text_corrections` before transmission, because provider timelines omit injected user messages. Final call records include a separately labelled, timestamped correction supplement; submission is not claimed to be provider acknowledgement. It displays the correction only after the bridge sends it.
 
 Live testing on 2026-09-30 confirmed saving and delivery but did not confirm that the managed agent uses the injected correction: it requested caller details already supplied in the text. The UI therefore asks callers to interrupt, repeat the detail aloud, and request readback if no acknowledgement follows. Typed correction comprehension remains an open provider integration issue.
-**Interrupt & speak** immediately clears and mutes the current local reply while keeping microphone capture
-active; a new reply can play normally. The underlying semantic interruption detector stays enabled.
+**Interrupt & speak** immediately clears and mutes the current local reply; speaker-mode capture resumes after
+the device/room echo tail, and a new reply can play normally. The underlying semantic interruption detector stays enabled.
 
 The browser checks its connection every five seconds, detects missing microphone packets, bounds its audio-send
 backlog, and shows upstream reconnection. After 20 seconds without reply progress, when the caller and playback
@@ -224,3 +228,42 @@ node scripts/voice_audio_smoke.mjs \
 
 See [voice reliability](VOICE_RELIABILITY.md) for the Twilio custom-parameter handshake,
 non-blocking tool dispatch, durable retries, and migration `0002` rollout requirements.
+
+
+## Supporting document desk
+
+Open `/documents` from the browser call page. This operator-assisted test console uses the existing gateway
+credential (`PREAUTH_GATEWAY_SECRET`, generated in git-ignored `.hosted/secrets.env` for local hosting). Enter
+it in the access-key field; it is never embedded in page assets, logged, or put in browser storage. This is the
+existing gateway trust model, not a separate provider identity system. A production provider portal should use
+the authenticating gateway described in `api/actor.py` rather than distributing the operator gateway secret.
+
+Look up the `PA-XXXXXXXX` reference, review missing requirements, choose the document type, and upload a PDF,
+PNG or JPEG (non-empty, at most 10 MB). The server checks the declared type against the file signature, stores
+private bytes under opaque names, calculates SHA-256, and registers metadata and an audit event through the
+same case service. Signature checking is not clinical content validation. Failed registration removes the new
+file. Downloads require the existing authenticated API boundary and are served as attachments with no caching;
+uploaded content has no public static URL. Cases already in review or decided reject additional uploads.
+
+`PREAUTH_DOCUMENT_STORE_DIR` selects the private directory (default `./data/documents`). Keep it with the
+case database when backing up or migrating. Both require durable storage on a future cloud deployment.
+After uploading, the desk refreshes requirements. Return to the same voice conversation and request a recheck
+quoting the case reference; the agent reuses the verification and original case. A recommendation still needs
+human review and the completed call record before sign-off. Registered files are available through the
+case-document download API to existing reviewer tooling.
+
+## Complete live conversation evaluation
+
+On Windows with System.Speech available, run:
+
+```powershell
+.testenv/Scripts/python.exe scripts/evaluate_live_conversations.py --base-url https://your-public-host
+```
+
+This uses a synthetic spoken caller against the real hosted AssemblyAI model, captures the model's actual
+replies, uploads actual synthetic document bytes, checks persisted tool outcomes, and ingests the authoritative
+completed-session timeline. Scenarios cover missing documents followed by same-case recheck, and failed
+verification with callback/logging and no coverage lookup. Synthetic transcripts and structured check results
+are saved only under git-ignored `.hosted/`. Failed checks cause a nonzero exit. The harness deliberately leaves
+synthetic cases and audit records intact. It is not a human accent, speaker-echo, Brave-device, or telephone
+acceptance test; those need real-device testing.

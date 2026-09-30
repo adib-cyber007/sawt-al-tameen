@@ -9,12 +9,14 @@ from preauth.agent_tools.toolbox import AgentToolbox
 from preauth.agent_tools.voice_gateway import ASSEMBLYAI_AGENT_ACTOR, VoiceToolGateway
 from preauth.api.errors import install_error_handlers
 from preauth.api.middleware import RequestContextMiddleware
-from preauth.api.routes import agent, assemblyai, cases, review, twilio, voice_tools
+from preauth.api.routes import agent, assemblyai, cases, documents, review, twilio, voice_tools
 from preauth.application.services import ApplicationServices
+from preauth.application.document_service import DocumentService
 from preauth.application.assemblyai_post_call import AssemblyAIPostCallService
 from preauth.application.twilio_inbound_service import TwilioInboundService
 from preauth.infrastructure.observability import install_log_context
 from preauth.infrastructure.settings import Settings
+from preauth.infrastructure.document_store import DocumentStore
 
 DESCRIPTION = """
 Backend for provider pre-authorisation requests: case intake, validation, rule evaluation, advisory
@@ -49,6 +51,7 @@ def create_app(
     app = FastAPI(title="Pre-Authorisation Case Service", version="0.1.0", description=DESCRIPTION)
     app.state.services = services
     app.state.settings = settings or Settings()
+    app.state.documents = DocumentService(services.cases, services.queries, DocumentStore(app.state.settings.document_store_dir))
     app.state.toolbox = AgentToolbox(services)
     app.state.voice_gateway = VoiceToolGateway(services, app.state.toolbox)
     app.state.assemblyai_voice_gateway = VoiceToolGateway(
@@ -58,6 +61,7 @@ def create_app(
     app.add_middleware(RequestContextMiddleware)
     install_error_handlers(app)
     app.include_router(cases.router)
+    app.include_router(documents.router)
     app.include_router(review.router)
     app.include_router(agent.router)
     app.include_router(voice_tools.router)
@@ -72,6 +76,14 @@ def create_app(
         def hosted_voice_console() -> FileResponse:
             # Always fetch the current HTML, which selects versioned worklets.
             return FileResponse(hosted_web / "index.html", headers={"Cache-Control": "no-store"})
+
+    document_web = Path(__file__).resolve().parent.parent / "hosted_web"
+
+    @app.get("/documents", include_in_schema=False)
+    def document_console() -> FileResponse:
+        return FileResponse(document_web / "documents.html", headers={"Cache-Control": "no-store"})
+
+    app.mount("/documents/assets", StaticFiles(directory=document_web), name="document-assets")
 
     if local_runtime is not None:
         from preauth.api.routes import local as local_routes

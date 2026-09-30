@@ -3195,6 +3195,268 @@
         ]
       }
     },
+    "/api/v1/cases/{case_id}/documents/upload": {
+      "post": {
+        "description": "Receives up to 10 MB of PDF, PNG or JPEG bytes and registers their hash and metadata in private storage.\n\n**Authorisation:** Actor type `PROVIDER_PORTAL` or `VOICE_AGENT`.\n\n**State transitions:** Editable states \u2192 INFORMATION_COLLECTION.",
+        "operationId": "upload_document_api_v1_cases__case_id__documents_upload_post",
+        "parameters": [
+          {
+            "description": "Case UUID",
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "description": "Case UUID",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DocumentType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "title",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared gateway secret, required when the deployment configures one",
+            "in": "header",
+            "name": "x-gateway-secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared gateway secret, required when the deployment configures one",
+              "title": "X-Gateway-Secret"
+            }
+          },
+          {
+            "description": "Verified actor type set by the gateway",
+            "in": "header",
+            "name": "x-actor-type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Verified actor type set by the gateway",
+              "title": "X-Actor-Type"
+            }
+          },
+          {
+            "description": "Verified actor identifier set by the gateway",
+            "in": "header",
+            "name": "x-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Verified actor identifier set by the gateway",
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "description": "Comma-separated reviewer roles (HUMAN_REVIEWER only)",
+            "in": "header",
+            "name": "x-actor-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated reviewer roles (HUMAN_REVIEWER only)",
+              "title": "X-Actor-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload and register a supporting document",
+        "tags": [
+          "Provider interaction"
+        ]
+      }
+    },
+    "/api/v1/cases/{case_id}/documents/{document_id}/content": {
+      "get": {
+        "description": "Returns privately stored content attached to this case as a download.\n\n**Authorisation:** Any authenticated actor.\n\n**State transitions:** None.",
+        "operationId": "download_document_api_v1_cases__case_id__documents__document_id__content_get",
+        "parameters": [
+          {
+            "description": "Case UUID",
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "description": "Case UUID",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared gateway secret, required when the deployment configures one",
+            "in": "header",
+            "name": "x-gateway-secret",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared gateway secret, required when the deployment configures one",
+              "title": "X-Gateway-Secret"
+            }
+          },
+          {
+            "description": "Verified actor type set by the gateway",
+            "in": "header",
+            "name": "x-actor-type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Verified actor type set by the gateway",
+              "title": "X-Actor-Type"
+            }
+          },
+          {
+            "description": "Verified actor identifier set by the gateway",
+            "in": "header",
+            "name": "x-actor-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Verified actor identifier set by the gateway",
+              "title": "X-Actor-Id"
+            }
+          },
+          {
+            "description": "Comma-separated reviewer roles (HUMAN_REVIEWER only)",
+            "in": "header",
+            "name": "x-actor-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated reviewer roles (HUMAN_REVIEWER only)",
+              "title": "X-Actor-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download a registered supporting document",
+        "tags": [
+          "Provider interaction"
+        ]
+      }
+    },
     "/api/v1/cases/{case_id}/recommendation": {
       "get": {
         "description": "The most recent system recommendation with its rule results, evidence, rationale, and engine versions. `advisory_only` is always true: a recommendation is not an authorisation decision.\n\n**Authorisation:** Any authenticated actor.\n\n**State transitions:** None.",

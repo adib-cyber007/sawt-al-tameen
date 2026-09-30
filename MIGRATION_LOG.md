@@ -1040,3 +1040,18 @@ measurements remain pending. No ElevenLabs code path will be used if AssemblyAI 
   between native caller partials was 1,202 ms. This is the provider's update cadence on one fixture, not
   an end-to-end word latency or a guarantee for Brave microphone input. A comparison with `min_latency`
   was not completed because the network test was blocked by the account's automatic approval usage limit.
+
+
+## 2026-09-30 — Speaker-safe interruption, documents and complete conversations
+
+- Pushed the prior working hosting-recovery version to main as `38f7a9d` before changes.
+- Added explicit device-speaker/headphone modes, output-latency-aware echo protection, and suppression of
+  late or ID-less interrupted audio. Retained the original single conversation transcript.
+- Added authenticated, bounded PDF/PNG/JPEG upload and download, private hashed file storage, case requirement
+  refresh, a document desk at `/documents`, and same-case recheck guidance. Registration failure cleans up files.
+- Strengthened identity readback and failed-verification callback instructions based on actual failed live calls.
+- Complete live synthetic conversations passed document-request/upload/recheck/human-review handoff (236 s,
+  four caller turns) and failed-verification/callback (131 s, three turns), with stored completed timelines.
+  Procedure readback remained inconsistent; this is recorded separately from backend workflow success.
+- Validation: 393 Python tests, 46 JS browser/audio tests, and real desktop/mobile document browser acceptance.
+  See `docs/CONVERSATION_ACCEPTANCE.md` for results and limits. Physical Brave speaker echo remains unverified.
