@@ -84,6 +84,19 @@ for file in paths:
         contents = file.read_text(encoding="utf-8", errors="replace")
         assert not any(value in contents for value in values), f"Credential match in {file.relative_to(ROOT)}"
 
+# Compare published media and project objects with the prepared local commit.
+# Metadata-only follow-up commits do not change the tested implementation.
+remote = subprocess.check_output(["git", "ls-remote", "origin", "refs/heads/main"], cwd=ROOT, text=True).strip()
+remote_revision = remote.split()[0] if remote else None
+published_paths = ["LICENSE", "src", "voice", "knowledge_base", "pyproject.toml"] + ["docs/submission/" + name for name in files[:4]]
+prepared_pushed = bool(remote_revision)
+for relative in published_paths:
+    if not prepared_pushed:
+        break
+    objects = subprocess.run(["git", "rev-parse", f"{remote_revision}:{relative}", f"HEAD:{relative}"], cwd=ROOT, text=True, capture_output=True)
+    hashes = objects.stdout.splitlines()
+    prepared_pushed = objects.returncode == 0 and len(hashes) == 2 and hashes[0] == hashes[1]
+
 report = {"checked_at_utc": datetime.now(timezone.utc).isoformat(), "title_characters": len(title),
           "summary_characters": len(short), "description_words": len(long.split()), "cover_pixels": [width, height],
           "pdf_slides": 9, "video_seconds": duration, "video_bytes": (OUT / "presentation.mp4").stat().st_size,
@@ -93,10 +106,11 @@ report = {"checked_at_utc": datetime.now(timezone.utc).isoformat(), "title_chara
           "browser_control": "Brave control unavailable: Windows sandbox helper setup failure",
           "ready_for_review": True,
           "repository_public": all(check["status"] == 200 for check in public),
-          "prepared_changes_pushed": False,
+          "prepared_changes_pushed": prepared_pushed,
+          "verified_remote_revision": remote_revision,
           "ready_for_final_submission": False,
-          "owner_instruction": "Prepare everything for review. Do not publish prepared changes or submit the entry yet.",
-          "remaining_actions": ["Owner reviews the package", "Publish prepared source and assets only after explicit approval", "Upload assets and submit the lablab form only after explicit approval"],
+          "owner_instruction": "Pushing the prepared changes is approved. Do not submit the hackathon entry yet.",
+          "remaining_actions": ["Owner reviews the package", "Confirm team enrollment", "Upload assets and submit the lablab form only after explicit approval"],
           "limits": ["Twilio phone number not configured", "Hosting depends on the demo computer staying online",
                      "Procedure readback inconsistent", "Physical echo and varied human accents need evaluation",
                      "MP4 contains synthetic narration and actual application screenshots, not a live call recording"]}

@@ -4,7 +4,7 @@ Event: [AssemblyAI Voice Agent Hackathon](https://lablab.ai/ai-hackathons/assemb
 
 Deadline verified on the rendered event page: **30 September 2026, 15:00 UTC / 20:30 IST**.
 
-Review status: the existing repository is public, but the prepared code and media remain local. Nothing has been pushed or submitted. Publish the prepared commit and upload these assets only after the owner's review and explicit approval.
+Review status: the repository is public and the prepared code and media have been pushed with the owner's approval. The hackathon entry has not been submitted. Upload assets and submit the form only after the owner's review and explicit approval.
 
 ## Title
 
@@ -44,7 +44,7 @@ Twilio is an implemented optional integration. Ollama, faster-whisper and Piper 
 
 ## Hosting and repository fields
 
-- Public repository: https://github.com/adib-cyber007/sawt-al-tameen (visibility verified; its main branch still contains the previous version until the owner approves publishing the local update)
+- Public repository: https://github.com/adib-cyber007/sawt-al-tameen (the prepared project and submission assets are available on main)
 - Application URL: https://dividable-fretted-aroma.ngrok-free.dev/voice
 - Demo guide: https://dividable-fretted-aroma.ngrok-free.dev/voice/assets/judges.html
 - Application platform: Python FastAPI, hosted on Windows through a static ngrok HTTPS tunnel
@@ -68,7 +68,7 @@ The general guide lists a title of at most 50 characters, a summary of at most 2
 
 - Confirm every team member enrolled and joined the lablab team, including solo entrants.
 - Confirm original work and accurately disclose reused components. The available Git history starts on 16 September 2026 and records an earlier voice-provider integration before the AssemblyAI migration. Describe the submitted AssemblyAI implementation accurately.
-- After the owner's review and approval, publish the prepared repository commit and verify its public main branch includes this package and LICENSE.
+- Verify the public main branch includes this package and LICENSE, then review all submitted descriptions and media.
 - Keep the demo computer connected to power and the internet throughout judging. Its static hostname depends on the running backend and tunnel.
 - Open the demo in a fresh browser. The free ngrok domain may display an initial notice.
 - Upload the cover, PDF and video, or supply the required public video link.
