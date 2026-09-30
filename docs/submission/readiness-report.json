@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-09-30T10:57:38.702187+00:00",
+  "checked_at_utc": "2026-09-30T11:01:35.182786+00:00",
   "title_characters": 37,
   "summary_characters": 224,
   "description_words": 396,
@@ -38,17 +38,21 @@
     },
     {
       "url": "https://github.com/adib-cyber007/sawt-al-tameen",
-      "status": 404,
-      "action": "Publish the current repository and verify anonymous access"
+      "status": 200
     }
   ],
   "local_credential_scan": "passed",
   "lablab_form_submitted": false,
   "browser_control": "Brave control unavailable: Windows sandbox helper setup failure",
+  "ready_for_review": true,
+  "repository_public": true,
+  "prepared_changes_pushed": false,
   "ready_for_final_submission": false,
+  "owner_instruction": "Prepare everything for review. Do not publish prepared changes or submit the entry yet.",
   "remaining_actions": [
-    "Publish updated source in a publicly accessible GitHub repository",
-    "Upload assets and submit the lablab form from the logged-in Brave session"
+    "Owner reviews the package",
+    "Publish prepared source and assets only after explicit approval",
+    "Upload assets and submit the lablab form only after explicit approval"
   ],
   "limits": [
     "Twilio phone number not configured",

@@ -4,6 +4,8 @@ Event: [AssemblyAI Voice Agent Hackathon](https://lablab.ai/ai-hackathons/assemb
 
 Deadline verified on the rendered event page: **30 September 2026, 15:00 UTC / 20:30 IST**.
 
+Review status: the existing repository is public, but the prepared code and media remain local. Nothing has been pushed or submitted. Publish the prepared commit and upload these assets only after the owner's review and explicit approval.
+
 ## Title
 
 Sawt al-Tameen: Insurance Voice Agent
@@ -42,7 +44,7 @@ Twilio is an implemented optional integration. Ollama, faster-whisper and Piper 
 
 ## Hosting and repository fields
 
-- Intended repository: https://github.com/adib-cyber007/sawt-al-tameen (currently returns 404 to unauthenticated visitors; publish and verify public access before submitting)
+- Public repository: https://github.com/adib-cyber007/sawt-al-tameen (visibility verified; its main branch still contains the previous version until the owner approves publishing the local update)
 - Application URL: https://dividable-fretted-aroma.ngrok-free.dev/voice
 - Demo guide: https://dividable-fretted-aroma.ngrok-free.dev/voice/assets/judges.html
 - Application platform: Python FastAPI, hosted on Windows through a static ngrok HTTPS tunnel
@@ -66,7 +68,7 @@ The general guide lists a title of at most 50 characters, a summary of at most 2
 
 - Confirm every team member enrolled and joined the lablab team, including solo entrants.
 - Confirm original work and accurately disclose reused components. The available Git history starts on 16 September 2026 and records an earlier voice-provider integration before the AssemblyAI migration. Describe the submitted AssemblyAI implementation accurately.
-- Publish the prepared repository commit and verify its public main branch includes this package and LICENSE.
+- After the owner's review and approval, publish the prepared repository commit and verify its public main branch includes this package and LICENSE.
 - Keep the demo computer connected to power and the internet throughout judging. Its static hostname depends on the running backend and tunnel.
 - Open the demo in a fresh browser. The free ngrok domain may display an initial notice.
 - Upload the cover, PDF and video, or supply the required public video link.
